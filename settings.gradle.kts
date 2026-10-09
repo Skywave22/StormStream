@@ -14,6 +14,10 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven { url = uri("https://jitpack.io") }
+        // libmpvKt (real prebuilt libmpv+ffmpeg+libass for Android)
+        maven("https://yuroyami.github.io/maven") {
+            content { includeModuleByRegex("io\\.github\\.yuroyami", "libmpvkt.*") }
+        }
     }
 }
 

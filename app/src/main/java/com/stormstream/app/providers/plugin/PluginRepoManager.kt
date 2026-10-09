@@ -111,7 +111,7 @@ class PluginRepoManager(
                             }
                         }
                     }
-                    val prov = Cs3Provider(providerManager.context, http.client, file, manifest)
+                    val prov = Cs3Provider(providerManager.ctx, http.client, file, manifest)
                     providerManager.register(prov)
                     true
                 }.getOrElse { t ->

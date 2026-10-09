@@ -1,6 +1,5 @@
 package com.stormstream.app.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -13,14 +12,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stormstream.app.data.AppViewModel
-import com.stormstream.app.player.engine.PlayerEngine
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,94 +27,42 @@ fun SettingsScreen(
 ) {
     val adult by viewModel.adultEnabled.collectAsState()
     val incognito by viewModel.incognitoEnabled.collectAsState()
-    val enginePref by viewModel.playerEngineType.collectAsState()
-
-    val mpvAvail = remember { PlayerEngine.isMpvAvailable() }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { Text("Settings", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                    }
-                },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         }
     ) { inner ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(inner)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // App card
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-            ) {
-                Row(
-                    Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f), modifier = Modifier.size(56.dp)) {
+        Column(Modifier.fillMaxSize().padding(inner).verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+
+            Surface(shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                        modifier = Modifier.size(56.dp)) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("⛈", fontSize = 28.sp)
                         }
                     }
                     Column {
-                        Text("StormStream", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-                        Text("Universal streaming — libmpv & ExoPlayer",
+                        Text("StormStream", fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleLarge)
+                        Text("Powered by libmpv · FFmpeg · libass · dav1d",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
 
-            // Player
-            SettingsGroup(title = "Player", icon = Icons.Default.PlayCircle) {
-                var engineExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(expanded = engineExpanded, onExpandedChange = { engineExpanded = it }) {
-                    OutlinedTextField(
-                        value = when (enginePref) {
-                            "mpv" -> "libmpv (recommended)"
-                            else -> "ExoPlayer (compatibility)"
-                        },
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Player engine") },
-                        leadingIcon = { Icon(Icons.Default.SmartDisplay, null) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = engineExpanded) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor(),
-                        shape = RoundedCornerShape(14.dp)
-                    )
-                    ExposedDropdownMenu(expanded = engineExpanded, onDismissRequest = { engineExpanded = false }) {
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text("libmpv (recommended)")
-                                    Text(
-                                        if (mpvAvail) "libmpv detected on device" else "Native lib not bundled — will fall back to ExoPlayer",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            },
-                            onClick = { viewModel.setPlayerEngine("mpv"); engineExpanded = false },
-                            enabled = true
-                        )
-                        DropdownMenuItem(
-                            text = { Text("ExoPlayer (compatibility)") },
-                            onClick = { viewModel.setPlayerEngine("exo"); engineExpanded = false }
-                        )
-                    }
-                }
+            SettingsGroup(title = "Playback", icon = Icons.Default.PlayCircle) {
                 SettingSwitch(
                     title = "Incognito mode",
                     subtitle = "Don't save watch history",
@@ -127,7 +72,6 @@ fun SettingsScreen(
                 )
             }
 
-            // Content
             SettingsGroup(title = "Content", icon = Icons.Default.Movie) {
                 SettingSwitch(
                     title = "Adult content",
@@ -138,31 +82,21 @@ fun SettingsScreen(
                 )
             }
 
-            // Data
             SettingsGroup(title = "Data", icon = Icons.Default.Storage) {
-                SettingRow(
-                    title = "Clear history",
-                    subtitle = "Remove all watch-progress entries",
+                SettingRow(title = "Clear history", subtitle = "Remove all watch-progress entries",
                     icon = Icons.Default.HistoryToggleOff,
-                    onClick = { viewModel.clearHistory() }
-                )
-                SettingRow(
-                    title = "Clear bookmarks",
-                    subtitle = "Remove all bookmarked items",
+                    onClick = { viewModel.clearHistory() })
+                SettingRow(title = "Clear bookmarks", subtitle = "Remove all bookmarked items",
                     icon = Icons.Default.DeleteSweep,
-                    onClick = { viewModel.clearBookmarks() }
-                )
-                SettingRow(
-                    title = "Clear extensions cache",
+                    onClick = { viewModel.clearBookmarks() })
+                SettingRow(title = "Clear extension cache",
                     subtitle = "Force providers to re-pull data on next refresh",
                     icon = Icons.Default.CleaningServices,
-                    onClick = { viewModel.clearExtensionCache() }
-                )
+                    onClick = { viewModel.clearExtensionCache() })
             }
 
-            // About
             SettingsGroup(title = "About", icon = Icons.Default.Info) {
-                Text("v0.3.0 · Built with Compose + libmpv + OkHttp",
+                Text("v0.4.0 · libmpv player · Compose · OkHttp",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
@@ -173,64 +107,47 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SettingsGroup(
-    title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    content: @Composable ColumnScope.() -> Unit
-) {
+private fun SettingsGroup(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
+                         content: @Composable ColumnScope.() -> Unit) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
-        Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-        ) {
+        Surface(shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)) {
             Column(Modifier.padding(vertical = 6.dp), content = content)
         }
     }
 }
 
 @Composable
-private fun SettingSwitch(
-    title: String,
-    subtitle: String?,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    checked: Boolean,
-    onChecked: (Boolean) -> Unit
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
+private fun SettingSwitch(title: String, subtitle: String?,
+                          icon: androidx.compose.ui.graphics.vector.ImageVector,
+                          checked: Boolean, onChecked: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
-            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Switch(checked = checked, onCheckedChange = onChecked)
     }
 }
 
 @Composable
-private fun SettingRow(
-    title: String,
-    subtitle: String?,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
+private fun SettingRow(title: String, subtitle: String?,
+                       icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
-            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }

@@ -9,12 +9,12 @@ plugins {
 
 android {
     namespace = "com.stormstream.app"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.stormstream.app"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 3
         versionName = "0.3.0"
         ndk {
@@ -47,8 +47,7 @@ android {
             jvmTarget.set(JvmTarget.JVM_17)
             freeCompilerArgs.addAll(
                 "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
-                "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi",
-                "-opt-in=androidx.media3.common.util.UnstableApi"
+                "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi"
             )
         }
     }
@@ -97,14 +96,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 
-    // Media3 (ExoPlayer fallback, MediaSession, DataSources)
-    implementation(libs.media3.exoplayer)
-    implementation(libs.media3.ui)
-    implementation(libs.media3.common)
-    implementation(libs.media3.dash)
-    implementation(libs.media3.hls)
-    implementation(libs.media3.session)
-    implementation(libs.media3.datasource)
+    // Real libmpv player (mpv + FFmpeg + libass + dav1d prebuilt for all 4 ABIs;
+    // includes native libs and a Compose MpvSurface/MpvPlayer).
+    implementation("io.github.yuroyami:libmpvkt-compose:0.3.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

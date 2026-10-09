@@ -44,7 +44,7 @@ import java.io.File
  *  - Enable/disable/uninstall flows with state updates.
  */
 class ProviderManager private constructor(
-    @get:JvmName("getContextCompat") internal val ctx: Context,
+    internal val ctx: Context,
     val http: StormHttpClient,
     private val store: StormStore,
 ) {

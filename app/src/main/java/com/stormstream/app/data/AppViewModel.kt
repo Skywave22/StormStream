@@ -105,11 +105,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch { store.adultContent.collect { _adultEnabled.value = it } }
         viewModelScope.launch { store.incognito.collect { _incognitoEnabled.value = it } }
-        viewModelScope.launch { store.playerEngine.collect { _playerEngineType.value = it } }
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO) {
             _homeLoading.value = true
             providerManager.initializeOnStart()
-            withContext(kotlinx.coroutines.Dispatchers.Main) {
+            withContext(Dispatchers.Main) {
                 refreshHome()
                 _homeLoading.value = false
             }
@@ -332,13 +331,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setIncognito(enabled: Boolean) {
         viewModelScope.launch { store.setIncognito(enabled) }
-    }
-
-    private val _playerEngineType = MutableStateFlow("mpv")
-    val playerEngineType: StateFlow<String> = _playerEngineType.asStateFlow()
-
-    fun setPlayerEngine(type: String) {
-        viewModelScope.launch { store.setPlayerEngine(type) }
     }
 
     /** Record/update a watch-history entry (no-op when incognito). */
