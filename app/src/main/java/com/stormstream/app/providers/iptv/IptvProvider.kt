@@ -10,7 +10,6 @@ import com.stormstream.app.data.StreamSource
 import com.stormstream.app.data.StreamType
 import com.stormstream.app.net.StormHttpClient
 import com.stormstream.app.providers.StreamProvider
-import java.util.Collections
 
 /**
  * IPTV/M3U provider.
