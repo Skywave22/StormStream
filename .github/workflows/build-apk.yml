@@ -47,23 +47,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           add-job-summary: on-failure
-
-      - name: Generate Gradle wrapper (if missing)
-        run: |
-          set -e
-          GRADLE_VERSION=$(sed -n 's/.*gradle-\([0-9.]*\)-bin.zip.*/\1/p' gradle/wrapper/gradle-wrapper.properties | head -1)
-          echo "Pinned Gradle version: $GRADLE_VERSION"
-          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            echo "gradle-wrapper.jar missing — generating it..."
-            curl -fsSL -o /tmp/gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
-            unzip -q -d /tmp /tmp/gradle.zip
-            /tmp/gradle-${GRADLE_VERSION}/bin/gradle wrapper --gradle-version "${GRADLE_VERSION}"
-          fi
-          chmod +x gradlew
-          ./gradlew --version
+          # Auto-provision Gradle 8.9 (matches wrapper) even without the JAR in-repo.
+          gradle-version: "8.9"
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: gradle assembleDebug --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -74,7 +62,7 @@ jobs:
           retention-days: 30
 
       - name: Build release APK (unsigned)
-        run: ./gradlew assembleRelease --stacktrace || true
+        run: gradle assembleRelease --stacktrace || true
 
       - name: Upload release APK (unsigned)
         if: always()
