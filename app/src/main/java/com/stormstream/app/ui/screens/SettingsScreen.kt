@@ -132,7 +132,7 @@ fun SettingsScreen(
                 SettingSwitch(
                     title = "Adult content",
                     subtitle = "Show adult-rated results",
-                    icon = Icons.Default.EighteenUpRating,
+                    icon = Icons.Default.Warning,
                     checked = adult,
                     onChecked = { viewModel.setAdultEnabled(it) }
                 )

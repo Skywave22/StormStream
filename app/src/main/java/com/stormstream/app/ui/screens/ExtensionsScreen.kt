@@ -118,13 +118,16 @@ fun ExtensionsScreen(
 }
 
 /** Bridge callback-style (onDone: (Boolean) -> Unit) calls to suspend functions. */
-private suspend fun callbackToSuspend(block: ((Boolean) -> Unit) -> Unit): Boolean {
-    return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-        block { ok ->
-            if (cont.isActive) cont.resume(kotlin.Result.success(ok)) { _, _, _ -> }
+private suspend fun callbackToSuspend(block: ((Boolean) -> Unit) -> Unit): Boolean =
+    kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        try {
+            block { ok ->
+                if (cont.isActive) cont.resumeWith(kotlin.Result.success(ok))
+            }
+        } catch (t: Throwable) {
+            if (cont.isActive) cont.resumeWith(kotlin.Result.failure(t))
         }
-    }.getOrDefault(false)
-}
+    }
 
 @Composable
 private fun InstalledList(installed: List<StreamProvider>, onRemove: (String) -> Unit) {

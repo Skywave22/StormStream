@@ -1,6 +1,7 @@
 package com.stormstream.app.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -110,8 +111,7 @@ fun HomeScreen(
                 Hero(
                     item = hero,
                     onPlay = { hero?.let { h ->
-                        viewModel.fetchDetail(h)
-                        viewModel.fetchStreams(h)
+                        viewModel.openItem(h)
                         onOpenItem(h)
                     }},
                     onOpen = { hero?.let(onOpenItem) }
@@ -163,7 +163,7 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
                         ) {
                             Text(
-                                ref.label,
+                                ref.name,
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold
                             )
