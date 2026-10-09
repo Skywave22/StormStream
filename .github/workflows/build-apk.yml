@@ -34,24 +34,22 @@ jobs:
           CMDLINE_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
           curl -fsSL -o /tmp/cmdline-tools.zip "$CMDLINE_URL"
           unzip -q -d /tmp/cmdline-tools /tmp/cmdline-tools.zip
-          # Unzipped content lives under cmdline-tools/ — rename to latest/.
           rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           mv /tmp/cmdline-tools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
-          ls "$ANDROID_SDK_ROOT"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           add-job-summary: on-failure
-          # Auto-provision Gradle 8.9 (matches wrapper) even without the JAR in-repo.
           gradle-version: "8.9"
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        working-directory: .
+        run: gradle assembleDebug --stacktrace --no-daemon
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -62,7 +60,7 @@ jobs:
           retention-days: 30
 
       - name: Build release APK (unsigned)
-        run: gradle assembleRelease --stacktrace || true
+        run: gradle assembleRelease --stacktrace --no-daemon || true
 
       - name: Upload release APK (unsigned)
         if: always()

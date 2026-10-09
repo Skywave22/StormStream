@@ -4,6 +4,12 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.stormstream.app.core.StormResult
+import com.stormstream.app.data.CatalogRef
+import com.stormstream.app.data.Episode
+import com.stormstream.app.data.MediaItem
+import com.stormstream.app.data.RepoIndex
+import com.stormstream.app.data.RepoPlugin
+import com.stormstream.app.data.StreamSource
 import com.stormstream.app.providers.ProviderManager
 import com.stormstream.app.providers.plugin.PluginRepoManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,8 +47,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _streams = MutableStateFlow<List<StreamSource>>(emptyList())
     val streams: StateFlow<List<StreamSource>> = _streams.asStateFlow()
 
-    private val _repos = MutableStateFlow<Map<String, com.stormstream.app.data.RepoIndex>>(emptyMap())
-    val repos: StateFlow<Map<String, com.stormstream.app.data.RepoIndex>> = _repos.asStateFlow()
+    private val _repos = MutableStateFlow<Map<String, RepoIndex>>(emptyMap())
+    val repos: StateFlow<Map<String, RepoIndex>> = _repos.asStateFlow()
 
     init {
         viewModelScope.launch {

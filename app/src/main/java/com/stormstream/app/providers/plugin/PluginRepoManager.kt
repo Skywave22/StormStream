@@ -1,7 +1,7 @@
 package com.stormstream.app.providers.plugin
 
 import android.util.Log
-import com.stormstream.app.data.InstalledExtension
+import com.stormstream.app.data.MediaType
 import com.stormstream.app.data.ProviderConfig
 import com.stormstream.app.data.ProviderType
 import com.stormstream.app.data.RepoIndex
@@ -78,13 +78,13 @@ class PluginRepoManager(
             else -> {
                 val types = plugin.tvTypes.mapNotNull { t ->
                     when (t) {
-                        "movie" -> com.stormstream.app.data.MediaType.MOVIE
-                        "tv", "series" -> com.stormstream.app.data.MediaType.SERIES
-                        "anime" -> com.stormstream.app.data.MediaType.ANIME
-                        "manga" -> com.stormstream.app.data.MediaType.MANGA
+                        "movie" -> MediaType.MOVIE
+                        "tv", "series" -> MediaType.SERIES
+                        "anime" -> MediaType.ANIME
+                        "manga" -> MediaType.MANGA
                         else -> null
                     }
-                }.toSet().ifEmpty { setOf(com.stormstream.app.data.MediaType.MOVIE) }
+                }.toSet().ifEmpty { setOf(MediaType.MOVIE) }
                 val cfg = ProviderConfig(
                     id = "${type.key}:${plugin.name.lowercase().replace(Regex("[^a-z0-9]+"), "-")}",
                     name = plugin.name,
