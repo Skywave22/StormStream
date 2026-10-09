@@ -22,98 +22,32 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      # Install Android cmdline-tools + platform 35 + build-tools 35 into a
-      # workspace-local SDK root. Avoids third-party Android setup actions.
-      - name: Install Android SDK
-        env:
-          ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+      # Use the community action — Node 20 deprecation warning is non-fatal.
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept licenses and install SDK
         run: |
           set -e
-          export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          curl -fsSL -o /tmp/cmdline-tools.zip \
-            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
-          unzip -q -d /tmp/cmdline-tools /tmp/cmdline-tools.zip
-          rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          mv /tmp/cmdline-tools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
-              "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
-          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager --list_installed | head
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
-      # Install Gradle 8.9 onto PATH. We invoke `gradle` directly rather than
-      # trying to run ./gradlew, because we didn't ship the wrapper JAR in-repo.
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           add-job-summary: on-failure
           gradle-version: "8.9"
 
-      - name: Verify gradle on PATH
-        run: |
-          set -e
-          which gradle
-          gradle --version
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls "$ANDROID_SDK_ROOT/platforms"
-          ls "$ANDROID_SDK_ROOT/build-tools"
-          # Write local.properties so AGP can find the SDK even without env vars.
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-          cat local.properties
-
       - name: Build debug APK
-        id: build_debug
-        continue-on-error: true
         run: |
-          set -o pipefail
-          gradle assembleDebug --stacktrace --no-daemon --console=plain 2>&1 | tee build-debug.log
-          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
-          echo "----- KOTLIN ERRORS -----"
-          grep -nE "^e: (file://)?/github" build-debug.log | head -80 || true
-          echo "----- WHAT WENT WRONG -----"
-          grep -nE "^\* What went wrong|^> |FAILURE:|BUILD FAILED|Caused by:" build-debug.log | head -40 || true
-          echo "----- TAIL -----"
-          tail -200 build-debug.log
-          exit 0
-
-      - name: Write errors to GITHUB_STEP_SUMMARY
-        if: always()
-        run: |
-          {
-            echo "# Build Report"
-            echo
-            echo '```'
-            grep -nE "^e: |^\* What went wrong|FAILURE:|BUILD FAILED|Caused by:" build-debug.log | head -100 || echo "No errors captured."
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Fail build on error
-        if: steps.build_debug.outputs.exit_code != '0'
-        run: exit 1
+          gradle assembleDebug --no-daemon --console=plain --stacktrace
 
       - name: Build release APK (unsigned)
-        if: always()
-        run: |
-          gradle assembleRelease --stacktrace --no-daemon --console=plain > build-release.log 2>&1 || true
-          tail -100 build-release.log
-
-      - name: Upload build log (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            build-debug.log
-            build-release.log
-          if-no-files-found: ignore
-          retention-days: 14
+        run: gradle assembleRelease --no-daemon --console=plain || true
 
       - name: Upload debug APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: stormstream-debug-apk
