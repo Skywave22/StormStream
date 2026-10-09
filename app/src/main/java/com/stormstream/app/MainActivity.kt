@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -217,10 +218,10 @@ private fun GlassBottomBar(
 }
 
 private fun Modifier.clickableNoIndication(
-    interactionSource: androidx.compose.foundation.interaction.MutableInteractionSource,
+    interactionSource: MutableInteractionSource,
     onClick: () -> Unit
 ) = this.then(
-    androidx.compose.foundation.clickable(
+    clickable(
         interactionSource = interactionSource,
         indication = null,
         onClick = onClick
