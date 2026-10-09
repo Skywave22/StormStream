@@ -257,7 +257,7 @@ private fun Hero(
                 shape = RoundedCornerShape(6.dp)
             ) {
                 Text(
-                    item.kind.name.replaceFirstChar { it.uppercase() },
+                    item.type.name.replaceFirstChar { it.uppercase() },
                     color = MaterialTheme.colorScheme.onPrimary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,

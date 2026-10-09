@@ -394,7 +394,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearExtensionCache() {
         viewModelScope.launch(Dispatchers.IO) {
-            providerManager.providers.value.forEach { p -> p.invalidateCache() }
+            providerManager.providers.value.values.forEach { p -> p.invalidateCache() }
             withContext(Dispatchers.Main) { refreshHome() }
         }
     }

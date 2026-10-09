@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -147,6 +149,7 @@ private fun GlassBottomBar(
     tabs: List<BottomTab>,
     backStackEntry: androidx.navigation.NavBackStackEntry?,
 ) {
+    val noIndicationInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Box(
         Modifier
             .fillMaxWidth()
@@ -180,7 +183,7 @@ private fun GlassBottomBar(
                         Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .background(if (selected) color.copy(alpha = 0.16f) else Color.Transparent)
-                            .clickableNoIndication {
+                            .clickableNoIndication(noIndicationInteraction) {
                                 navController.navigate(tab.screen.route) {
                                     popUpTo(navController.graph.findStartDestination().id) {
                                         saveState = true
@@ -213,11 +216,13 @@ private fun GlassBottomBar(
     }
 }
 
-private fun Modifier.clickableNoIndication(onClick: () -> Unit) =
-    this.then(
-        androidx.compose.foundation.clickable(
-            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-            indication = null,
-            onClick = onClick
-        )
+private fun Modifier.clickableNoIndication(
+    interactionSource: androidx.compose.foundation.interaction.MutableInteractionSource,
+    onClick: () -> Unit
+) = this.then(
+    androidx.compose.foundation.clickable(
+        interactionSource = interactionSource,
+        indication = null,
+        onClick = onClick
     )
+)

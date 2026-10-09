@@ -73,7 +73,7 @@ fun ExtensionsScreen(
                     }
                 }
                 when (tab) {
-                    0 -> InstalledList(installed = installed, onRemove = { id ->
+                    0 -> InstalledList(installed = installed.values.toList(), onRemove = { id ->
                         viewModel.uninstallProvider(id)
                     })
                     1 -> AddUrlPanel(

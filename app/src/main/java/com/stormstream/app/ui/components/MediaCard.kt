@@ -94,7 +94,7 @@ fun MediaCard(
         )
         if (item.year != null) {
             Text(
-                "${item.year} · ${item.kind.name.lowercase().replaceFirstChar { it.uppercase() }}",
+                "${item.year} · ${item.type.name.lowercase().replaceFirstChar { it.uppercase() }}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
