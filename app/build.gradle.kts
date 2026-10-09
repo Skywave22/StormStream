@@ -96,9 +96,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 
-    // Real libmpv player (mpv + FFmpeg + libass + dav1d prebuilt for all 4 ABIs;
-    // includes native libs and a Compose MpvSurface/MpvPlayer).
-    implementation("io.github.yuroyami:libmpvkt-compose:0.2.0")
+    // Real libmpv player (mpv + FFmpeg + libass prebuilt) — mpv-compose 1.0.0 on Maven Central
+    implementation("dev.marcelsoftware.mpvcompose:mpv-compose:1.0.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

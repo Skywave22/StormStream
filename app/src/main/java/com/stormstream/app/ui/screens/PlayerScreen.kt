@@ -23,32 +23,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stormstream.app.data.AppViewModel
 import com.stormstream.app.data.StormStore
-import io.github.yuroyami.libmpvkt.MPV
-import io.github.yuroyami.libmpvkt.compose.MpvPlayer
+import dev.marcelsoftware.mpvcompose.MPVLib
+import dev.marcelsoftware.mpvcompose.MPVPlayer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlin.math.max
-import kotlin.math.min
 
 /**
- * Full-screen video player — **libmpv only** (via libmpvkt-compose).
- *
- * Uses [MpvPlayer] which embeds a real mpv View backed by libmpv + FFmpeg +
- * libass + dav1d (prebuilt for all four ABIs by libmpvKt). Gesture-driven UI:
- * tap to toggle controls, double-tap seeks, play/pause, scrubber, source
- * chips, speed, subtitle/audio cycle.
+ * Full-screen video player — **libmpv only** via mpv-compose (MPVPlayer).
+ * No ExoPlayer, no fallbacks.  FFmpeg + libass + hw decoding handled natively.
  */
 @Composable
 fun PlayerScreen(
     onBack: () -> Unit,
     viewModel: AppViewModel = viewModel(),
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
     val target by viewModel.playback.collectAsState()
     val history by viewModel.history.collectAsState()
 
@@ -67,143 +59,110 @@ fun PlayerScreen(
     val streams = playback.streams
     var selectedIndex by remember(playback.selectedIndex) { mutableIntStateOf(playback.selectedIndex) }
     var controlsVisible by remember { mutableStateOf(true) }
-    var positionMs by remember { mutableLongStateOf(0L) }
-    var durationMs by remember { mutableLongStateOf(0L) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var isBuffering by remember { mutableStateOf(true) }
-    var errMsg by remember { mutableStateOf<String?>(null) }
-    var mpv by remember { mutableStateOf<MPV?>(null) }
+    var posSec by remember { mutableLongStateOf(0L) }
+    var durSec by remember { mutableLongStateOf(0L) }
+    var isPaused by remember { mutableStateOf(false) }
+    var isEof by remember { mutableStateOf(false) }
     var speed by remember { mutableFloatStateOf(1f) }
-    val scope = rememberCoroutineScope()
+    var errMsg by remember { mutableStateOf<String?>(null) }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            val pos = positionMs
-            val dur = max(0, durationMs)
-            val stream = streams.getOrNull(selectedIndex)
-            if (pos > 2_000L) {
-                viewModel.recordProgress(playback.item, playback.episode, stream?.url, pos, dur)
-            }
-            mpv?.close()
-            mpv = null
-        }
-    }
-
-    // Observe mpv state once we have an mpv instance.
-    LaunchedEffect(mpv) {
-        val m = mpv ?: return@LaunchedEffect
-        launch {
-            while (isActive) {
-                delay(500L)
-                runCatching {
-                    val m = mpv ?: return@runCatching
-                    val t = m.getPropertyString("time-pos")?.toDoubleOrNull() ?: 0.0
-                    val d = m.getPropertyString("duration")?.toDoubleOrNull() ?: 0.0
-                    val p = m.getPropertyString("pause") == "yes"
-                    val coreIdle = m.getPropertyString("core-idle") == "yes"
-                    val cacheBuff = m.getPropertyString("paused-for-cache") == "yes"
-                    positionMs = (t * 1000).toLong()
-                    durationMs = (d * 1000).toLong()
-                    isPlaying = !p && !coreIdle
-                    isBuffering = cacheBuff || (positionMs == 0L && d > 0 && !isPlaying)
-                }
-            }
-        }
-
-    }
-
-    // Load selected stream
-    LaunchedEffect(selectedIndex, mpv) {
-        val s = streams.getOrNull(selectedIndex) ?: return@LaunchedEffect
-        val m = mpv ?: return@LaunchedEffect
-        errMsg = null
-        isBuffering = true
-        // Set custom http headers by writing them as a "\n"-separated string
-        val headerStr = s.headers.entries.joinToString("\n") { "${it.key}: ${it.value}" }
-        if (headerStr.isNotBlank()) {
-            runCatching { m.setPropertyString("http-header-fields", headerStr) }
-        }
-        runCatching {
-            m.setPropertyDouble("speed", speed.toDouble())
-            m.command("loadfile", s.url)
-        }.onFailure { errMsg = it.message }
-        // Resume from history
-        val key = StormStore.historyKey(playback.item, playback.episode)
-        val resumeMs = history.firstOrNull { it.key == key && !it.completed }?.positionMs
-        if (resumeMs != null && resumeMs > 5_000L) {
-            kotlinx.coroutines.delay(800)
-            runCatching { m.command("seek", "${resumeMs / 1000.0}", "absolute") }
-        }
-        isBuffering = false
-    }
-
-    // Periodic history writes
-    LaunchedEffect(playback, selectedIndex, mpv) {
-        val stream = streams.getOrNull(selectedIndex)
+    // Periodic progress save + hide controls
+    LaunchedEffect(playback, selectedIndex) {
         while (isActive) {
             delay(5_000L)
-            val pos = positionMs
-            val dur = max(0, durationMs)
-            if (pos > 2_000L && mpv != null) {
-                viewModel.recordProgress(playback.item, playback.episode, stream?.url, pos, dur)
+            if (durSec > 0 && posSec > 2) {
+                val stream = streams.getOrNull(selectedIndex)
+                viewModel.recordProgress(
+                    playback.item, playback.episode, stream?.url,
+                    posSec * 1000L, durSec * 1000L
+                )
             }
         }
     }
 
-    // Auto-hide controls
-    LaunchedEffect(controlsVisible, isPlaying) {
-        if (controlsVisible && isPlaying) {
+    LaunchedEffect(controlsVisible, !isPaused) {
+        if (controlsVisible && !isPaused) {
             delay(3_500L)
             controlsVisible = false
         }
     }
 
+    // Load the selected stream (with headers + resume).
+    fun loadCurrent() {
+        val s = streams.getOrNull(selectedIndex) ?: return
+        errMsg = null
+        isEof = false
+        // mpv accepts custom http headers via the http-header-fields string property,
+        // using "\n"-separated "Key: Value" lines.
+        val headerStr = s.headers.entries.joinToString("\n") { "${it.key}: ${it.value}" }
+        if (headerStr.isNotBlank()) {
+            MPVLib.setPropertyString("http-header-fields", headerStr)
+        }
+        MPVLib.setPropertyDouble("speed", speed.toDouble())
+        MPVLib.command(arrayOf("loadfile", s.url))
+    }
+
+    // When mpv is initialized, configure it and load the first stream.
+    var initialized by remember { mutableStateOf(false) }
+    LaunchedEffect(initialized, selectedIndex) {
+        if (!initialized) return@LaunchedEffect
+        loadCurrent()
+        // Resume from history
+        val key = StormStore.historyKey(playback.item, playback.episode)
+        val resumeSec = history.firstOrNull { it.key == key && !it.completed }?.let { it.positionMs / 1000 }
+        if (resumeSec != null && resumeSec > 5) {
+            delay(800)
+            MPVLib.command(arrayOf("seek", resumeSec.toString(), "absolute"))
+        }
+    }
+
+    // Rely on observed-property callbacks for state (see propertyObserver).
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        // Video surface — MpvPlayer is the libmpvkt-compose drop-in.
-        MpvPlayer(
+        MPVPlayer(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) { detectTapGestures(onTap = { controlsVisible = !controlsVisible }) },
-            factory = { ctx ->
-                MPV(ctx) { opts ->
-                    opts.setOptionString("hwdec", "auto")
-                    opts.setOptionString("cache", "yes")
-                    opts.setOptionString("cache-secs", "10")
-                    opts.setOptionString("demuxer-max-bytes", "${300 * 1024 * 1024}")
-                    opts.setOptionString("ytdl", "no")
-                    opts.setOptionString("tls-verify", "no")
-                    opts.setOptionString("video-scale", "lanczos")
-                }.also { mpv = it }
+            onInitialized = {
+                MPVLib.setPropertyString("vo", "gpu")
+                MPVLib.setPropertyString("hwdec", "auto")
+                MPVLib.setPropertyString("cache", "yes")
+                MPVLib.setPropertyString("cache-secs", "10")
+                MPVLib.setPropertyString("ytdl", "no")
+                MPVLib.setPropertyBoolean("keep-open", true)
+                // tls-verify off because mpv's Mbed TLS can't read Android CA store
+                MPVLib.setPropertyString("tls-verify", "no")
+                initialized = true
+            },
+            observedProperties = {
+                long("duration")
+                long("time-pos")
+                boolean("pause")
+                boolean("eof-reached")
+            },
+            propertyObserver = {
+                long("duration") { durSec = it }
+                long("time-pos") { posSec = it }
+                boolean("pause") { isPaused = it }
+                boolean("eof-reached") { eof -> isEof = eof }
             }
-        ) { view ->
-            // Called once MpvView is ready; load the stream.
-            val m = view.mpv
-            if (m != null && streams.getOrNull(selectedIndex) != null && mpv == null) {
-                mpv = m
-            }
-        }
-
-        // Buffering
-        if (isBuffering && errMsg == null) {
-            CircularProgressIndicator(color = Color.White, modifier = Modifier.align(Alignment.Center))
-        }
+        )
 
         // Error
         errMsg?.let { err ->
             Surface(color = Color.Black.copy(alpha = 0.75f), shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.align(Alignment.Center).padding(24.dp)) {
                 Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Playback error", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Playback error", color = Color.White, fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(6.dp))
-                    Text(err, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodySmall)
+                    Text(err, color = Color.White.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(10.dp))
                     Row {
-                        TextButton(onClick = {
-                            errMsg = null
-                            streams.getOrNull(selectedIndex)?.let { s ->
-                                mpv?.command("loadfile", s.url)
-                            }
-                        }) { Text("Retry", color = Color.White) }
+                        TextButton(onClick = { errMsg = null; loadCurrent() }) {
+                            Text("Retry", color = Color.White)
+                        }
                         Spacer(Modifier.width(8.dp))
                         TextButton(onClick = onBack) { Text("Back", color = Color.White) }
                     }
@@ -211,87 +170,107 @@ fun PlayerScreen(
             }
         }
 
-        // Controls
+        // Controls overlay
         AnimatedVisibility(visible = controlsVisible, enter = fadeIn(), exit = fadeOut(),
             modifier = Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().background(
-                Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent, Color.Black.copy(alpha = 0.8f)))
+                Brush.verticalGradient(listOf(
+                    Color.Black.copy(alpha = 0.6f), Color.Transparent, Color.Black.copy(alpha = 0.8f)))
             )) {
-                // Top bar
-                Row(Modifier.align(Alignment.TopStart).statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth(),
+                // Top
+                Row(Modifier.align(Alignment.TopStart).statusBarsPadding()
+                    .padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
+                    }
                     Column(Modifier.weight(1f).padding(start = 4.dp)) {
                         Text(playback.item.title, color = Color.White, fontWeight = FontWeight.SemiBold,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        val sub = playback.episode?.let { "S${it.season}:E${it.number} · ${it.title ?: ""}" } ?: "libmpv"
+                        val sub = playback.episode?.let { "S${it.season}:E${it.number} · ${it.title ?: ""}" }
+                            ?: "libmpv"
                         Text(sub, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1)
                     }
                     SuggestionChip(onClick = {},
                         label = { Text("libmpv", color = Color.White, fontSize = 10.sp) },
-                        colors = SuggestionChipDefaults.suggestionChipColors(containerColor = Color.White.copy(alpha = 0.15f)))
+                        colors = SuggestionChipDefaults.suggestionChipColors(
+                            containerColor = Color.White.copy(alpha = 0.15f)))
                 }
 
                 // Center controls
-                Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { mpv?.command("seek", "-10") }) {
+                Row(Modifier.align(Alignment.Center),
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = {
+                        MPVLib.command(arrayOf("seek", "-10"))
+                    }) {
                         Icon(Icons.Default.Replay10, "Back 10s", tint = Color.White, modifier = Modifier.size(36.dp))
                     }
-                    Surface(color = Color.White.copy(alpha = 0.15f), shape = CircleShape, modifier = Modifier.size(64.dp)) {
+                    Surface(color = Color.White.copy(alpha = 0.15f), shape = CircleShape,
+                        modifier = Modifier.size(64.dp)) {
                         IconButton(onClick = {
-                            val m = mpv ?: return@IconButton
-                            val p: Boolean? = m.prop["pause"]
-                            if (p == true) m.command("set", "pause", "no") else m.command("set", "pause", "yes")
+                            MPVLib.setPropertyBoolean("pause", !isPaused)
                         }, modifier = Modifier.fillMaxSize()) {
-                            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = "Play/Pause", tint = Color.White, modifier = Modifier.size(36.dp))
+                            Icon(if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                contentDescription = "Play/Pause", tint = Color.White,
+                                modifier = Modifier.size(36.dp))
                         }
                     }
-                    IconButton(onClick = { mpv?.command("seek", "10") }) {
-                        Icon(Icons.Default.Forward10, "Forward 10s", tint = Color.White, modifier = Modifier.size(36.dp))
+                    IconButton(onClick = { MPVLib.command(arrayOf("seek", "10")) }) {
+                        Icon(Icons.Default.Forward10, "Forward 10s", tint = Color.White,
+                            modifier = Modifier.size(36.dp))
                     }
                 }
 
                 // Bottom
-                Column(Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 12.dp).fillMaxWidth()) {
+                Column(Modifier.align(Alignment.BottomStart).navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 12.dp).fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(formatTime(positionMs), color = Color.White, fontSize = 12.sp)
+                        Text(formatTime(posSec * 1000), color = Color.White, fontSize = 12.sp)
                         Spacer(Modifier.width(8.dp))
                         Slider(
-                            value = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
-                            onValueChange = { mpv?.command("seek", "${(it * durationMs / 1000)}", "absolute") },
-                            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = 0.3f)),
+                            value = if (durSec > 0) (posSec.toFloat() / durSec).coerceIn(0f, 1f) else 0f,
+                            onValueChange = {
+                                MPVLib.command(arrayOf("seek", (it * durSec).toInt().toString(), "absolute"))
+                            },
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.White, activeTrackColor = Color.White,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.3f)),
                             modifier = Modifier.weight(1f)
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text(formatTime(durationMs), color = Color.White, fontSize = 12.sp)
+                        Text(formatTime(durSec * 1000), color = Color.White, fontSize = 12.sp)
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = {
-                            speed = when {
-                                speed >= 2f -> 0.5f
-                                else -> (speed + 0.25f)
-                            }
-                            mpv?.setPropertyDouble("speed", speed.toDouble())
-                        }) {
-                            Text("${speed}x", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(6.dp).clip(RoundedCornerShape(6.dp)).background(Color.White.copy(alpha = 0.15f)).padding(horizontal = 8.dp, vertical = 4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TextButton(onClick = {
+                            speed = when { speed >= 2f -> 0.5f; else -> speed + 0.25f }
+                            MPVLib.setPropertyDouble("speed", speed.toDouble())
+                        }, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
+                            Text("${speed}x", fontWeight = FontWeight.Bold, fontSize = 12.sp,
+                                modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                                    .background(Color.White.copy(alpha = 0.15f))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp))
                         }
-                        IconButton(onClick = { mpv?.command("cycle", "sub") }) {
-                            Icon(Icons.Default.ClosedCaption, "Subtitles", tint = Color.White, modifier = Modifier.size(22.dp))
+                        IconButton(onClick = { MPVLib.command(arrayOf("cycle", "sub")) }) {
+                            Icon(Icons.Default.ClosedCaption, "Subs", tint = Color.White,
+                                modifier = Modifier.size(22.dp))
                         }
-                        IconButton(onClick = { mpv?.command("cycle", "audio") }) {
-                            Icon(Icons.Default.Audiotrack, "Audio", tint = Color.White, modifier = Modifier.size(22.dp))
+                        IconButton(onClick = { MPVLib.command(arrayOf("cycle", "audio")) }) {
+                            Icon(Icons.Default.Audiotrack, "Audio", tint = Color.White,
+                                modifier = Modifier.size(22.dp))
                         }
                         if (streams.size > 1) {
-                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 streams.forEachIndexed { i, s ->
-                                    FilterChip(
-                                        selected = i == selectedIndex,
+                                    FilterChip(selected = i == selectedIndex,
                                         onClick = { selectedIndex = i },
-                                        label = { Text((s.quality ?: s.name).take(20), color = Color.White, style = MaterialTheme.typography.labelSmall) },
-                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f), containerColor = Color.White.copy(alpha = 0.12f))
-                                    )
+                                        label = { Text((s.quality ?: s.name).take(18), color = Color.White,
+                                            style = MaterialTheme.typography.labelSmall) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                                            containerColor = Color.White.copy(alpha = 0.12f)))
                                 }
                             }
                         }
