@@ -22,8 +22,8 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      # Manually install Android cmdline-tools + platform 35 + build-tools 35.
-      # Avoids deprecated third-party actions that are broken on Node 24 runners.
+      # Install Android cmdline-tools + platform 35 + build-tools 35 into a
+      # workspace-local SDK root. Avoids third-party Android setup actions.
       - name: Install Android SDK
         env:
           ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
@@ -31,8 +31,8 @@ jobs:
           set -e
           export ANDROID_SDK_ROOT="$ANDROID_SDK_ROOT"
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          CMDLINE_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
-          curl -fsSL -o /tmp/cmdline-tools.zip "$CMDLINE_URL"
+          curl -fsSL -o /tmp/cmdline-tools.zip \
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
           unzip -q -d /tmp/cmdline-tools /tmp/cmdline-tools.zip
           rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           mv /tmp/cmdline-tools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
@@ -41,26 +41,26 @@ jobs:
           sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
               "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
           echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
           echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --list_installed | head
 
-      - name: Download Gradle wrapper JAR
+      # Install Gradle 8.9 onto PATH, then use it to generate the wrapper
+      # scripts + wrapper JAR. This is the most reliable way on CI because we
+      # don't have to download the wrapper JAR from GitHub directly.
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          add-job-summary: on-failure
+          gradle-version: "8.9"
+
+      - name: Generate Gradle wrapper
         run: |
           set -e
-          mkdir -p gradle/wrapper
-          curl -fL -o gradle/wrapper/gradle-wrapper.jar \
-            "https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar"
+          gradle wrapper --gradle-version 8.9 --distribution-type bin
           chmod +x gradlew
           ls -la gradle/wrapper/
           ./gradlew --version
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle/libs.versions.toml') }}
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
