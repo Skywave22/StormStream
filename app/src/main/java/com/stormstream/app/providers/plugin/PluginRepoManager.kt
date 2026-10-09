@@ -92,10 +92,9 @@ class PluginRepoManager(
             }
             ProviderType.CS3 -> {
                 runCatching {
-                    val bytes = (http.getBytes(plugin.url, timeoutMs = 30_000L)
-                        as? StormHttpClient.StormHttpResult.Ok)?.body
+                    val bytes = http.getBytes(plugin.url, timeoutMs = 30_000L)
                         ?: return@runCatching false
-                    val dir = File(providerManager.context.filesDir, "cs3").apply { mkdirs() }
+                    val dir = File(providerManager.ctx.filesDir, "cs3").apply { mkdirs() }
                     val file = File(dir, "${plugin.name}.cs3")
                     file.writeBytes(bytes)
                     // Read embedded plugin.json if present, else use defaults.
