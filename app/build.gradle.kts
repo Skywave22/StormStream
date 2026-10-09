@@ -9,12 +9,12 @@ plugins {
 
 android {
     namespace = "com.stormstream.app"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.stormstream.app"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 2
         versionName = "0.2.0"
     }
@@ -80,8 +80,6 @@ dependencies {
 
     // Data persistence
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
 
     // Networking
     implementation(libs.okhttp)

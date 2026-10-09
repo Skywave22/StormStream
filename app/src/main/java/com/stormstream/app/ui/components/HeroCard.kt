@@ -1,6 +1,5 @@
 package com.stormstream.app.ui.components
 
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -39,7 +38,7 @@ fun HeroCard(
     }
     if (featured.isEmpty()) return
 
-    var index by remember { mutableIntStateOf(0) }
+    var index by remember { mutableStateOf(0) }
     LaunchedEffect(featured.size) {
         while (true) {
             delay(6_000L)
