@@ -9,7 +9,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stormstream.app.data.AppViewModel
@@ -24,11 +26,14 @@ fun SearchScreen(
 ) {
     var query by remember { mutableStateOf("") }
     val results by viewModel.searchResults.collectAsState()
+    val loading by viewModel.searchLoading.collectAsState()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Search") },
+                title = {
+                    Text("Search", fontWeight = FontWeight.Bold)
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                 ),
@@ -45,19 +50,60 @@ fun SearchScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 singleLine = true,
+                shape = MaterialTheme.shapes.large,
             )
-            if (query.isBlank()) {
-                Spacer(Modifier.height(24.dp))
-                Text("Start typing to search across all installed providers.",
-                    modifier = Modifier.padding(horizontal = 24.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(120.dp),
-                    contentPadding = PaddingValues(8.dp),
-                ) {
-                    items(results, key = { it.id + "@" + it.providerId }) { item ->
-                        PosterCard(item = item, onClick = { onItemClick(item) })
+            when {
+                query.isBlank() -> {
+                    Box(
+                        Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                "Search across all installed providers",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                loading -> {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+                results.isEmpty() -> {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No results for \"$query\".",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                else -> {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(120.dp),
+                        contentPadding = PaddingValues(8.dp),
+                    ) {
+                        items(results, key = { it.id + "@" + it.providerId }) { item ->
+                            PosterCard(item = item, onClick = { onItemClick(item) })
+                        }
                     }
                 }
             }

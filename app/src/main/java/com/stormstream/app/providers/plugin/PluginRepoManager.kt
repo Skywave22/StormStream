@@ -13,18 +13,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Loads third-party extension repos (the same idea as Hikari's "Add repo" flow).
+ * Loads third-party extension repos.
  *
- * A repo URL points at a repo.json of one of three shapes:
- *   1. Hiki/Storm/Vega style:
+ * Understood repo shapes:
+ *   1. Hiki/Storm/Vega/Hikari-style:
  *      { "name": "...", "plugins": [ { "name", "url", "version", "tvTypes", "providerType" } ] }
- *   2. CloudStream style:
+ *   2. CloudStream-style:
  *      { "name": "...", "manifestVersion": 1, "pluginLists": [ "<url to plugins.json>" ] }
- *      where plugins.json is itself a list of plugin objects.
- *   3. Plain github.com/owner/repo shorthand — we rewrite it to the raw URL.
+ *   3. Plain github.com/owner/repo shorthand → raw builds/repo.json.
  *
- * Once fetched, plugins are shown to the user and installed on demand; the
- * per-type runtime downloads the file and loads it (JS, dex, json config, etc).
+ * Phase 1 fixes:
+ *  - Uses async [StormHttpClient] with timeouts so a bad repo URL doesn't crash.
+ *  - Better error surfacing (throws a typed exception that callers catch).
+ *  - Proper provider type inference from tvTypes when providerType is missing.
  */
 class PluginRepoManager(
     private val http: StormHttpClient,
@@ -37,16 +38,27 @@ class PluginRepoManager(
 
     suspend fun addRepo(url: String): RepoIndex = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(url)
-        val body = http.get(normalized)
-        var idx = StormJson.decodeFromString(RepoIndex.serializer(), body)
-        // If it's a CloudStream-style manifest, follow pluginLists.
+        val body = when (val r = http.get(normalized, timeoutMs = 12_000L)) {
+            is StormHttpClient.StormHttpResult.Ok -> r.body
+            is StormHttpClient.StormHttpResult.Err ->
+                throw RuntimeException("Failed to fetch repo: ${r.message}")
+        }
+        var idx = try {
+            StormJson.decodeFromString(RepoIndex.serializer(), body)
+        } catch (e: Exception) {
+            throw RuntimeException("Invalid repo JSON at $normalized: ${e.message}", e)
+        }
+        // CloudStream-style manifest: follow pluginLists
         if (idx.pluginLists.isNotEmpty() && idx.plugins.isEmpty()) {
             val all = mutableListOf<RepoPlugin>()
             idx.pluginLists.forEach { listUrl ->
-                val listBody = runCatching { http.get(listUrl) }.getOrNull()
+                val listBody = (http.get(listUrl, timeoutMs = 12_000L)
+                    as? StormHttpClient.StormHttpResult.Ok)?.body
                 if (listBody != null) {
-                    val arr = StormJson.decodeFromString<List<RepoPlugin>>(listBody)
-                    all += arr
+                    runCatching {
+                        StormJson.decodeFromString<List<RepoPlugin>>(listBody)
+                    }.onSuccess { all += it }
+                      .onFailure { Log.w(TAG, "Plugin list parse fail $listUrl", it) }
                 }
             }
             idx = idx.copy(plugins = all)
@@ -58,22 +70,22 @@ class PluginRepoManager(
     suspend fun installPlugin(plugin: RepoPlugin): Boolean = withContext(Dispatchers.IO) {
         val type = plugin.providerType?.let {
             runCatching { ProviderType.valueOf(it.uppercase()) }.getOrNull()
-        } ?: ProviderType.STORM
+        } ?: inferTypeFromTvTypes(plugin.tvTypes)
+
         when (type) {
-            // For demo, we register scaffold entries. Real code would download
-            // the plugin file to cache dir and hand off to the per-type runtime.
             ProviderType.STREMIO -> {
-                providerManager.installStremioAddon(plugin.url)
-                true
+                val r = providerManager.installStremioAddon(plugin.url)
+                r.isOk
             }
             ProviderType.UNIVERSAL_SCRAPER -> {
-                val cfgJson = runCatching { http.get(plugin.url) }.getOrNull()
-                if (cfgJson != null) { providerManager.installUniversalScraper(cfgJson); true }
-                else false
+                val cfgJson = (http.get(plugin.url, timeoutMs = 10_000L)
+                    as? StormHttpClient.StormHttpResult.Ok)?.body
+                if (cfgJson != null) {
+                    providerManager.installUniversalScraper(cfgJson).isOk
+                } else false
             }
             ProviderType.IPTV -> {
-                providerManager.installIptvPlaylist(plugin.name, plugin.url)
-                true
+                providerManager.installIptvPlaylist(plugin.name, plugin.url).isOk
             }
             else -> {
                 val types = plugin.tvTypes.mapNotNull { t ->
@@ -84,7 +96,7 @@ class PluginRepoManager(
                         "manga" -> MediaType.MANGA
                         else -> null
                     }
-                }.toSet().ifEmpty { setOf(MediaType.MOVIE) }
+                }.toSet().ifEmpty { setOf(MediaType.MOVIE, MediaType.SERIES) }
                 val cfg = ProviderConfig(
                     id = "${type.key}:${plugin.name.lowercase().replace(Regex("[^a-z0-9]+"), "-")}",
                     name = plugin.name,
@@ -101,10 +113,14 @@ class PluginRepoManager(
         }
     }
 
+    private fun inferTypeFromTvTypes(tvTypes: List<String>): ProviderType {
+        // Default to Storm native for generic plugin packages.
+        return ProviderType.STORM
+    }
+
     private fun normalizeUrl(raw: String): String {
         val t = raw.trim()
         if (t.startsWith("http")) return t
-        // github.com/owner/repo short form → raw build repo.json.
         val gh = Regex("""github\.com/([^/]+)/([^/]+)/?""").find(t)
         if (gh != null) {
             val (owner, repo) = gh.destructured

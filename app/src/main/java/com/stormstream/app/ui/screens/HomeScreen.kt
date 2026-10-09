@@ -4,11 +4,15 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stormstream.app.data.AppViewModel
@@ -23,19 +27,44 @@ fun HomeScreen(
     onItemClick: (MediaItem) -> Unit,
 ) {
     val home by viewModel.homeState.collectAsState()
-    val loading by viewModel.loading.collectAsState()
+    val loading by viewModel.homeLoading.collectAsState()
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    var isRefreshing by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("StormStream", style = MaterialTheme.typography.headlineSmall)
-                        Text("One player, every provider.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.FlashOn,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                "StormStream",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "One player, every provider.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {
+                        isRefreshing = true
+                        viewModel.refreshHome()
+                        isRefreshing = false
+                    }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -46,53 +75,108 @@ fun HomeScreen(
             )
         }
     ) { padding ->
-        if (loading) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + 80.dp),
-            ) {
-                item {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        shape = MaterialTheme.shapes.large,
-                    ) {
-                        Column(Modifier.padding(20.dp)) {
-                            Text("Welcome to StormStream",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            Spacer(Modifier.height(4.dp))
-                            Text("Add Stremio addons, universal scrapers, CloudStream plugins, " +
-                                    "Vega providers, M3U playlists and more — all in one player.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            if (loading && home.isEmpty()) {
+                // Initial full-screen loading
+                Column(
+                    Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Loading your providers…",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-                items(home.keys.toList(), key = { it.catalogId + "@" + it.providerId }) { ref: CatalogRef ->
-                    val rows = home[ref].orEmpty()
-                    if (rows.isNotEmpty()) {
-                        ContentRow(
-                            title = ref.name,
-                            subtitle = providerLabel(ref),
-                            items = rows,
-                            onItemClick = onItemClick,
-                        )
-                    }
-                }
-                if (home.isEmpty()) {
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 80.dp, top = 8.dp),
+                ) {
+                    // Hero
                     item {
-                        Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text("No providers installed yet — open the Extensions tab to add sources.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            shape = MaterialTheme.shapes.extraLarge,
+                        ) {
+                            Row(
+                                Modifier.padding(20.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.FlashOn,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(40.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.width(16.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "Welcome to StormStream",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        "Stremio addons, universal scrapers, M3U playlists — all in one.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
                         }
                     }
+
+                    items(home.keys.toList(), key = { it.catalogId + "@" + it.providerId }) { ref ->
+                        val rows = home[ref].orEmpty()
+                        if (rows.isNotEmpty()) {
+                            ContentRow(
+                                title = ref.name,
+                                subtitle = providerLabel(ref),
+                                items = rows,
+                                onItemClick = onItemClick,
+                            )
+                        }
+                    }
+
+                    if (home.isEmpty() && !loading) {
+                        item {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        "No sources installed yet",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Open the Extensions tab to add Stremio addons, IPTV playlists, or scrapers.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom refresh indicator (small) when refresh is triggered
+                if (isRefreshing) {
+                    LinearProgressIndicator(
+                        Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                    )
                 }
             }
         }

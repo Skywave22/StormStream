@@ -7,11 +7,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stormstream.app.data.AppViewModel
@@ -24,18 +26,17 @@ fun ExtensionsScreen(viewModel: AppViewModel = viewModel()) {
     val providers by viewModel.providers.collectAsState()
     val repos by viewModel.repos.collectAsState()
 
-    var showAddMenu by remember { mutableStateOf(false) }
     var addDialog: AddDialogKind? by remember { mutableStateOf(null) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Extensions") },
+                title = { Text("Extensions", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                 ),
                 actions = {
-                    IconButton(onClick = { showAddMenu = true }) {
+                    IconButton(onClick = { addDialog = AddDialogKind.MENU }) {
                         Icon(Icons.Default.Add, contentDescription = "Add")
                     }
                 }
@@ -59,25 +60,84 @@ fun ExtensionsScreen(viewModel: AppViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                Text("Installed providers (${providers.size})",
-                    style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Installed (${providers.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
                 Spacer(Modifier.height(8.dp))
             }
+
+            if (providers.isEmpty()) {
+                item {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(20.dp)) {
+                            Text(
+                                "No extensions yet",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Tap the + button to add a Stremio addon, M3U playlist, universal scraper, or extension repo.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
             items(providers.values.toList(), key = { it.config.id }) { p ->
-                ElevatedCard(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(16.dp),
+                var enabled by remember(p.config.id, p.config.enabled) {
+                    mutableStateOf(p.config.enabled)
+                }
+                ElevatedCard(
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        Modifier.padding(12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         ProviderBadge(p.config.type)
                         Column(Modifier.weight(1f)) {
-                            Text(p.config.name, style = MaterialTheme.typography.titleSmall)
-                            Text(p.config.type.key,
+                            Text(
+                                p.config.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                buildString {
+                                    append(p.config.type.key)
+                                    p.config.version?.let { append(" · v$it") }
+                                },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                        Text("v${p.config.version ?: "?"}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Switch(
+                                checked = enabled,
+                                onCheckedChange = {
+                                    enabled = it
+                                    viewModel.toggleProviderEnabled(p.config.id, it)
+                                }
+                            )
+                            IconButton(onClick = {
+                                viewModel.uninstallProvider(p.config.id)
+                            }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Uninstall",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -85,28 +145,55 @@ fun ExtensionsScreen(viewModel: AppViewModel = viewModel()) {
             if (repos.isNotEmpty()) {
                 item {
                     Spacer(Modifier.height(16.dp))
-                    Text("Added repos", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Added repos",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
                     Spacer(Modifier.height(8.dp))
                 }
                 repos.forEach { (url, idx) ->
                     item {
-                        ElevatedCard(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                        ElevatedCard(
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Column(Modifier.padding(16.dp)) {
-                                Text(idx.name ?: url, style = MaterialTheme.typography.titleSmall)
-                                if (idx.description != null) {
-                                    Text(idx.description, style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    idx.name ?: url,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (!idx.description.isNullOrBlank()) {
+                                    Text(
+                                        idx.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                                 Spacer(Modifier.height(8.dp))
-                                idx.plugins.take(5).forEach { plug: RepoPlugin ->
-                                    Row(verticalAlignment = Alignment.CenterVertically,
+                                idx.plugins.take(6).forEach { plug: RepoPlugin ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween,
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                                        Text("• ${plug.name}", style = MaterialTheme.typography.bodySmall)
-                                        TextButton(onClick = { viewModel.installPlugin(plug) }) {
-                                            Text("Install")
-                                        }
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            "• ${plug.name}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        TextButton(
+                                            onClick = { viewModel.installPlugin(plug) }
+                                        ) { Text("Install") }
                                     }
+                                }
+                                if (idx.plugins.size > 6) {
+                                    Text(
+                                        "+ ${idx.plugins.size - 6} more",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
@@ -116,14 +203,12 @@ fun ExtensionsScreen(viewModel: AppViewModel = viewModel()) {
         }
     }
 
-    if (showAddMenu) {
-        AddSourceMenu(
-            onDismiss = { showAddMenu = false },
-            onPick = { addDialog = it; showAddMenu = false }
-        )
-    }
-
+    // Dialogs
     when (addDialog) {
+        AddDialogKind.MENU -> AddSourceMenu(
+            onDismiss = { addDialog = null },
+            onPick = { addDialog = it }
+        )
         AddDialogKind.STREMIO -> AddUrlDialog(
             title = "Add Stremio addon",
             label = "manifest.json URL",
@@ -150,7 +235,7 @@ fun ExtensionsScreen(viewModel: AppViewModel = viewModel()) {
     }
 }
 
-enum class AddDialogKind { STREMIO, IPTV, SCRAPER, REPO }
+enum class AddDialogKind { MENU, STREMIO, IPTV, SCRAPER, REPO }
 
 @Composable
 private fun ProviderBadge(type: ProviderType) {
@@ -158,7 +243,7 @@ private fun ProviderBadge(type: ProviderType) {
     val (label, color, textColor) = when (type) {
         ProviderType.STREMIO -> Triple("ST", scheme.primary, scheme.onPrimary)
         ProviderType.UNIVERSAL_SCRAPER -> Triple("SC", scheme.secondary, scheme.onSecondary)
-        ProviderType.CS3 -> Triple("CS", scheme.tertiary, scheme.onTertiary)
+        ProviderType.CS3 -> Triple("CS3", scheme.tertiary, scheme.onTertiary)
         ProviderType.VEGA -> Triple("VG", scheme.error, scheme.onError)
         ProviderType.SKYSTREAM -> Triple("SK", scheme.primaryContainer, scheme.onPrimaryContainer)
         ProviderType.SORA -> Triple("SO", scheme.secondaryContainer, scheme.onSecondaryContainer)
@@ -168,11 +253,14 @@ private fun ProviderBadge(type: ProviderType) {
         ProviderType.MANGA -> Triple("MG", scheme.secondary, scheme.onSecondary)
         ProviderType.STORM -> Triple("SS", scheme.tertiary, scheme.onTertiary)
     }
-    Surface(color = color, shape = RoundedCornerShape(8.dp)) {
-        Text(label,
+    Surface(color = color, shape = RoundedCornerShape(10.dp)) {
+        Text(
+            label,
             color = textColor,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelLarge)
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -180,14 +268,14 @@ private fun ProviderBadge(type: ProviderType) {
 private fun AddSourceMenu(onDismiss: () -> Unit, onPick: (AddDialogKind) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add source") },
+        title = { Text("Add source", fontWeight = FontWeight.Bold) },
         text = {
             Column {
                 MenuItemBtn("Stremio addon (manifest URL)") { onPick(AddDialogKind.STREMIO) }
                 MenuItemBtn("Universal JSON/HTML scraper") { onPick(AddDialogKind.SCRAPER) }
                 MenuItemBtn("IPTV / M3U playlist") { onPick(AddDialogKind.IPTV) }
-                Divider()
-                MenuItemBtn("CloudStream / Vega / SkyStream / Sora / Aniyomi / Nuvio / Storm — add via repo") {
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                MenuItemBtn("Add extension repo (CloudStream / Vega / Storm)") {
                     onPick(AddDialogKind.REPO)
                 }
             }
@@ -198,7 +286,10 @@ private fun AddSourceMenu(onDismiss: () -> Unit, onPick: (AddDialogKind) -> Unit
 
 @Composable
 private fun MenuItemBtn(text: String, onClick: () -> Unit) {
-    TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+    ) {
         Text(text, style = MaterialTheme.typography.bodyLarge)
     }
 }
@@ -214,7 +305,7 @@ private fun AddUrlDialog(
     var text by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        title = { Text(title, fontWeight = FontWeight.Bold) },
         text = {
             OutlinedTextField(
                 value = text,
@@ -223,11 +314,14 @@ private fun AddUrlDialog(
                 placeholder = { Text(placeholder) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
             )
         },
         confirmButton = {
-            TextButton(onClick = { if (text.isNotBlank()) onConfirm(text.trim()) },
-                enabled = text.isNotBlank()) { Text("Add") }
+            TextButton(
+                onClick = { if (text.isNotBlank()) onConfirm(text.trim()) },
+                enabled = text.isNotBlank()
+            ) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
@@ -239,19 +333,32 @@ private fun AddIptvDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> 
     var url by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add IPTV playlist") },
+        title = { Text("Add IPTV playlist", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it },
-                    label = { Text("Playlist name") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = url, onValueChange = { url = it },
-                    label = { Text("M3U URL") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Playlist name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("M3U URL") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                if (name.isNotBlank() && url.isNotBlank()) onConfirm(name.trim(), url.trim())
-            }, enabled = name.isNotBlank() && url.isNotBlank()) { Text("Add") }
+            TextButton(
+                onClick = {
+                    if (name.isNotBlank() && url.isNotBlank()) onConfirm(name.trim(), url.trim())
+                },
+                enabled = name.isNotBlank() && url.isNotBlank()
+            ) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
@@ -262,19 +369,25 @@ private fun AddScraperDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit)
     var json by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add universal scraper") },
+        title = { Text("Add universal scraper", fontWeight = FontWeight.Bold) },
         text = {
             OutlinedTextField(
-                value = json, onValueChange = { json = it },
+                value = json,
+                onValueChange = { json = it },
                 label = { Text("JSON configuration") },
-                placeholder = { Text("""{"name":"MySite","baseUrl":"https://...","mode":"HTML",...}""") },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp),
-                maxLines = 12,
+                placeholder = {
+                    Text("""{"name":"MySite","baseUrl":"https://...","mode":"HTML",...}""")
+                },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp),
+                maxLines = 14,
+                shape = RoundedCornerShape(12.dp),
             )
         },
         confirmButton = {
-            TextButton(onClick = { if (json.isNotBlank()) onConfirm(json.trim()) },
-                enabled = json.isNotBlank()) { Text("Add") }
+            TextButton(
+                onClick = { if (json.isNotBlank()) onConfirm(json.trim()) },
+                enabled = json.isNotBlank()
+            ) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )

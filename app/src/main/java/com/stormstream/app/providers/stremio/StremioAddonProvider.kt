@@ -1,5 +1,6 @@
 package com.stormstream.app.providers.stremio
 
+import android.util.Log
 import com.stormstream.app.data.CatalogRef
 import com.stormstream.app.data.Episode
 import com.stormstream.app.data.MediaItem
@@ -17,16 +18,18 @@ import kotlinx.serialization.Serializable
 import java.net.URLEncoder
 
 /**
- * Stremio addon adapter.
- *
- * Implements the v3 Stremio addon protocol:
+ * Stremio addon adapter implementing the v3 protocol:
  *  - GET /manifest.json for catalogs/meta resource types
  *  - GET /catalog/{type}/{id}.json for home rows
  *  - GET /catalog/{type}/{id}/search={query}.json for search
  *  - GET /meta/{type}/{id}.json for details
  *  - GET /stream/{type}/{id}[/{season}/{episode}].json for streams
  *
- * Reference: https://github.com/Stremio/stremio-addon-sdk
+ * Phase 1 fixes:
+ *  - Uses StormHttpClient's async result type instead of throwing on HTTP errors.
+ *  - Search fallbacks fixed (no more imaginary "top" catalog).
+ *  - Better type mapping, supports "anime" type, skips torrent-only streams safely.
+ *  - Handles behaviorHints.notWebReady.
  */
 class StremioAddonProvider(
     private val http: StormHttpClient,
@@ -48,9 +51,7 @@ class StremioAddonProvider(
 
     private val baseUrl: String = baseUrlFrom(manifestUrl)
 
-    override suspend fun initialize() {
-        // Warm manifest — nothing else needed.
-    }
+    override suspend fun initialize() {}
 
     override suspend fun catalogs(): List<CatalogRef> = manifest.catalogs.map { c ->
         val mt = c.type?.toMediaType() ?: MediaType.MOVIE
@@ -68,38 +69,31 @@ class StremioAddonProvider(
     override suspend fun getCatalog(ref: CatalogRef, page: Int): List<MediaItem> {
         val stype = ref.extra["stremioType"] ?: "movie"
         val url = "$baseUrl/catalog/$stype/${ref.catalogId}.json"
-        val body = http.get(url)
-        val parsed = StormJson.decodeFromString<StremioCatalogResponse>(body)
-        return parsed.metas.map { it.toMediaItem(ref.providerId) }
+        val body = (http.get(url, timeoutMs = 12_000L) as? StormHttpClient.StormHttpResult.Ok)?.body
+            ?: return emptyList()
+        return runCatching {
+            StormJson.decodeFromString<StremioCatalogResponse>(body).metas
+                .map { it.toMediaItem(ref.providerId) }
+        }.onFailure { Log.w(TAG, "Parse fail for $url", it) }.getOrDefault(emptyList())
     }
 
     override val searchOnly: Boolean get() = false
 
     override suspend fun search(query: String, page: Int): List<MediaItem> {
-        // Stremio search is exposed as an "extra" named "search" on catalogs.
         val out = mutableListOf<MediaItem>()
-        val typesWeSupport = setOf("movie", "series") intersect manifest.types.toSet()
+        val encoded = encodeSearch(query)
         for (c in manifest.catalogs) {
-            val stype = c.type ?: if (typesWeSupport.contains("movie")) "movie" else continue
-            if (stype !in typesWeSupport) continue
-            val searchable = c.extraRequired?.any { it.name == "search" } == true ||
-                    c.extraSupported?.any { it.name == "search" } == true
-            if (!searchable && c.extraRequired != null && c.extraSupported != null) continue
-            val url = "$baseUrl/catalog/$stype/${c.id}/search=${encodeSearch(query)}.json"
-            val resp = runCatching {
-                val body = http.get(url)
-                StormJson.decodeFromString<StremioCatalogResponse>(body).metas
-            }.getOrDefault(emptyList())
-            out += resp.map { it.toMediaItem(config.id) }
-        }
-        // Some addons support search across all catalogs generically; fall back to
-        // a generic movie-catalog search for minimal addons.
-        if (out.isEmpty()) {
-            runCatching {
-                val body = http.get("$baseUrl/catalog/movie/top/search=${encodeSearch(query)}.json")
-                out += StormJson.decodeFromString<StremioCatalogResponse>(body).metas
-                    .map { it.toMediaItem(config.id) }
-            }
+            val stype = c.type ?: continue
+            val canSearch = c.extraSupported?.any { it.name == "search" } == true ||
+                    c.extraRequired?.any { it.name == "search" } == true
+            if (!canSearch) continue
+            val url = "$baseUrl/catalog/$stype/${c.id}/search=$encoded.json"
+            val resp = (http.get(url, timeoutMs = 8_000L) as? StormHttpClient.StormHttpResult.Ok)?.body
+                ?: continue
+            val metas = runCatching {
+                StormJson.decodeFromString<StremioCatalogResponse>(resp).metas
+            }.onFailure { Log.w(TAG, "Search parse fail for $url", it) }.getOrDefault(emptyList())
+            out += metas.map { it.toMediaItem(config.id) }
         }
         return out
     }
@@ -107,39 +101,41 @@ class StremioAddonProvider(
     override suspend fun getMeta(item: MediaItem): MediaItem {
         val stype = stremioTypeFrom(item.type)
         val url = "$baseUrl/meta/$stype/${item.id}.json"
-        val body = runCatching { http.get(url) }.getOrNull() ?: return item
-        val parsed = StormJson.decodeFromString<StremioMetaResponse>(body)
-        val meta = parsed.meta ?: return item
+        val body = (http.get(url, timeoutMs = 8_000L) as? StormHttpClient.StormHttpResult.Ok)?.body
+            ?: return item
+        val parsed = runCatching {
+            StormJson.decodeFromString<StremioMetaResponse>(body).meta
+        }.getOrNull() ?: return item
         return item.copy(
-            title = meta.name ?: item.title,
-            posterUrl = meta.poster ?: item.posterUrl,
-            backdropUrl = meta.background ?: meta.banner ?: item.backdropUrl,
-            year = meta.year?.toIntOrNull() ?: meta.released?.take(4)?.toIntOrNull() ?: item.year,
-            rating = meta.imdbRating?.toString()?.toDoubleOrNull(),
-            description = meta.description ?: item.description,
-            genres = meta.genres ?: item.genres,
-            totalSeasons = meta.videos?.let { vs -> vs.mapNotNull { it.season }.maxOrNull() }
-                ?: item.totalSeasons,
+            title = parsed.name ?: item.title,
+            posterUrl = parsed.poster ?: item.posterUrl,
+            backdropUrl = parsed.background ?: parsed.banner ?: item.backdropUrl,
+            year = parsed.year?.toIntOrNull()
+                ?: parsed.released?.take(4)?.toIntOrNull() ?: item.year,
+            rating = parsed.imdbRating,
+            description = parsed.description ?: item.description,
+            genres = parsed.genres ?: item.genres,
+            totalSeasons = parsed.videos?.mapNotNull { it.season }?.maxOrNull() ?: item.totalSeasons,
         )
     }
 
     override suspend fun getEpisodes(item: MediaItem): List<Episode>? {
         if (item.type !in setOf(MediaType.SERIES, MediaType.ANIME)) return null
-        // Episodes come back attached to the meta response as "videos".
+        val url = "$baseUrl/meta/${stremioTypeFrom(item.type)}/${item.id}.json"
+        val body = (http.get(url, timeoutMs = 10_000L) as? StormHttpClient.StormHttpResult.Ok)?.body
+            ?: return null
         val meta = runCatching {
-            val url = "$baseUrl/meta/${stremioTypeFrom(item.type)}/${item.id}.json"
-            val body = http.get(url)
             StormJson.decodeFromString<StremioMetaResponse>(body).meta
-        }.getOrNull()
-        val videos = meta?.videos ?: return null
+        }.getOrNull() ?: return null
+        val videos = meta.videos ?: return null
         return videos.filter { it.season != null && it.episode != null }
-            .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
+            .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }, { it.released ?: "" }))
             .map { v ->
                 Episode(
                     id = "${item.id}:${v.season}:${v.episode}",
                     providerId = config.id,
                     showId = item.id,
-                    title = v.title,
+                    title = v.title ?: "Episode ${v.episode}",
                     season = v.season ?: 1,
                     number = v.episode ?: 1,
                     thumbnailUrl = v.thumbnail,
@@ -158,24 +154,35 @@ class StremioAddonProvider(
         } else {
             "$baseUrl/stream/$stype/${item.id}.json"
         }
-        val body = runCatching { http.get(url) }.getOrNull() ?: return emptyList()
-        val resp = StormJson.decodeFromString<StremioStreamResponse>(body)
-        return resp.streams.map { s ->
+        val body = (http.get(url, timeoutMs = 10_000L) as? StormHttpClient.StormHttpResult.Ok)?.body
+            ?: return emptyList()
+        val resp = runCatching {
+            StormJson.decodeFromString<StremioStreamResponse>(body)
+        }.getOrNull() ?: return emptyList()
+        return resp.streams.mapNotNull { s ->
+            val streamUrl = when {
+                !s.url.isNullOrBlank() -> s.url
+                !s.externalUrl.isNullOrBlank() -> s.externalUrl
+                s.ytId != null -> "https://www.youtube.com/watch?v=${s.ytId}"
+                // Torrents (infoHash) are not web-ready; skip unless explicitly marked.
+                s.infoHash != null && s.behaviorHints?.notWebReady != true ->
+                    "magnet:?xt=urn:btih:${s.infoHash}"
+                else -> return@mapNotNull null
+            }
+            // Skip torrents that aren't web-ready (need a debrid service we don't have)
+            if (s.infoHash != null && s.behaviorHints?.notWebReady == true)
+                return@mapNotNull null
+            val name = s.title ?: s.name ?: "Stream"
+            val type = inferType(streamUrl)
             StreamSource(
-                name = s.title ?: s.name ?: "Stream",
-                url = s.url ?: s.externalUrl ?: s.infoHash?.let { "magnet:?xt=urn:btih:$it" } ?: return@map null,
-                type = when {
-                    s.url?.endsWith(".m3u8") == true -> StreamType.HLS
-                    s.url?.endsWith(".mpd") == true -> StreamType.DASH
-                    s.url?.endsWith(".mp4") == true -> StreamType.MP4
-                    s.url?.endsWith(".mkv") == true -> StreamType.MKV
-                    s.infoHash != null -> StreamType.MP4 // torrent — not playable without a resolver; leave MP4 as placeholder
-                    else -> inferTypeFromHeaders(s)
-                },
+                name = name,
+                url = streamUrl,
+                type = type,
                 quality = s.qualityLabel ?: s.bitrate?.let { "${it / 1000}kbps" },
                 headers = s.httpHeaders.orEmpty(),
-                subtitles = s.subtitles.map { sub ->
-                    Subtitle(
+                subtitles = s.subtitles.mapNotNull { sub ->
+                    if (sub.url.isBlank()) null
+                    else Subtitle(
                         label = sub.label ?: sub.lang ?: "Subtitle",
                         language = sub.lang ?: "en",
                         url = sub.url,
@@ -183,17 +190,17 @@ class StremioAddonProvider(
                 },
                 providerId = config.id,
             )
-        }.filterNotNull()
+        }
     }
 
-    private fun inferTypeFromHeaders(s: StremioStream): StreamType {
-        val url = s.url ?: return StreamType.UNKNOWN
-        return when {
-            url.contains("m3u8") -> StreamType.HLS
-            url.contains("mpd") -> StreamType.DASH
-            url.contains(".mp4") -> StreamType.MP4
-            else -> StreamType.HLS
-        }
+    private fun inferType(url: String): StreamType = when {
+        url.endsWith(".m3u8") || url.contains("m3u8") -> StreamType.HLS
+        url.endsWith(".mpd") || url.contains(".mpd") -> StreamType.DASH
+        url.endsWith(".mp4") || url.contains(".mp4") -> StreamType.MP4
+        url.endsWith(".mkv") || url.contains(".mkv") -> StreamType.MKV
+        url.startsWith("magnet:") -> StreamType.UNKNOWN // not directly playable
+        url.startsWith("https://www.youtube.com") -> StreamType.UNKNOWN
+        else -> StreamType.HLS
     }
 
     private fun stremioTypeFrom(mt: MediaType): String = when (mt) {
@@ -206,9 +213,8 @@ class StremioAddonProvider(
 
     private fun String.toMediaType(): MediaType? = when (this) {
         "movie" -> MediaType.MOVIE
-        "series" -> MediaType.SERIES
+        "series", "tv" -> MediaType.SERIES
         "anime" -> MediaType.ANIME
-        "tv" -> MediaType.IPTV
         "channel" -> MediaType.LIVE
         else -> null
     }
@@ -216,15 +222,18 @@ class StremioAddonProvider(
     private fun encodeSearch(q: String): String =
         URLEncoder.encode(q, "UTF-8")
 
-    private fun baseUrlFrom(manifestUrl: String): String {
-        // Strip the trailing /manifest.json to get the addon root.
-        return manifestUrl.substringBeforeLast("/manifest.json")
+    private fun baseUrlFrom(manifestUrl: String): String =
+        manifestUrl.substringBeforeLast("/manifest.json")
             .substringBeforeLast("/manifest")
-    }
 
     companion object {
+        private const val TAG = "StormStremio"
         fun fromUrl(http: StormHttpClient, url: String): StremioAddonProvider {
-            val body = http.get(url)
+            val body = when (val r = http.get(url, timeoutMs = 10_000L)) {
+                is StormHttpClient.StormHttpResult.Ok -> r.body
+                is StormHttpClient.StormHttpResult.Err ->
+                    throw RuntimeException("Failed to fetch manifest: ${r.message}")
+            }
             val manifest = StormJson.decodeFromString<StremioManifest>(body)
             return StremioAddonProvider(http, manifest, url)
         }
@@ -292,9 +301,9 @@ data class StremioMeta(
     fun toMediaItem(providerId: String): MediaItem {
         val mt = when (type) {
             "movie" -> MediaType.MOVIE
-            "series" -> MediaType.SERIES
+            "series", "tv" -> MediaType.SERIES
             "anime" -> MediaType.ANIME
-            "tv", "channel" -> MediaType.IPTV
+            "channel" -> MediaType.LIVE
             else -> MediaType.MOVIE
         }
         return MediaItem(

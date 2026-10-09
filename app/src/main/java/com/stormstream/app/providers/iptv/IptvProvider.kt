@@ -1,5 +1,6 @@
 package com.stormstream.app.providers.iptv
 
+import android.util.Log
 import com.stormstream.app.data.CatalogRef
 import com.stormstream.app.data.Episode
 import com.stormstream.app.data.MediaItem
@@ -16,11 +17,13 @@ import com.stormstream.app.providers.StreamProvider
  *
  * Parses Extended M3U playlists (#EXTM3U, #EXTINF with tvg-logo, group-title,
  * tvg-id attributes). Supports #EXTGRP and plain non-attributed #EXTINF lines.
- * Streams are assumed to be HLS unless the URL suffix indicates otherwise.
  *
- * M3U8 playlists that do TV/Radio are very common for public IPTV lists; this
- * provider lets StormStream treat them as a first-class content source, like
- * Hikari's IPTV tab.
+ * Phase 1 fixes:
+ *  - Streaming line-by-line parser (avoids exploding memory on giant lists).
+ *  - Caps parse count (MAX_CHANNELS) to protect against 20k-channel playlists
+ *    blocking the UI on first load.
+ *  - Lazy HTTP fetch uses StormHttpClient with timeout + retries.
+ *  - Deduplicates group names for catalog list.
  */
 class IptvProvider(
     private val http: StormHttpClient,
@@ -39,17 +42,25 @@ class IptvProvider(
     @Volatile
     private var channels: List<IptvChannel> = emptyList()
 
-    override suspend fun initialize() {
-        channels = parsePlaylist(http.get(playlistUrl))
-    }
+    @Volatile
+    private var groupCatalogs: List<CatalogRef> = emptyList()
 
-    override suspend fun catalogs(): List<CatalogRef> {
-        val groups = channels.map { it.group ?: "Other" }.distinct()
-        val out = mutableListOf(
-            CatalogRef(config.id, "all", "All Channels", MediaType.IPTV)
-        )
+    override suspend fun initialize() {
+        val body = when (val r = http.get(playlistUrl, timeoutMs = 20_000L, retries = 1)) {
+            is StormHttpClient.StormHttpResult.Ok -> r.body
+            is StormHttpClient.StormHttpResult.Err -> {
+                Log.w(TAG, "IPTV fetch failed for $playlistName: ${r.message}")
+                channels = emptyList()
+                groupCatalogs = emptyList()
+                return
+            }
+        }
+        channels = parsePlaylist(body)
+        val groups = channels.map { it.group ?: "Other" }.distinct().take(MAX_GROUPS)
+        val catalogs = mutableListOf<CatalogRef>()
+        catalogs += CatalogRef(config.id, "all", "All Channels", MediaType.IPTV)
         groups.forEach { g ->
-            out += CatalogRef(
+            catalogs += CatalogRef(
                 providerId = config.id,
                 catalogId = "group:${g}",
                 name = g,
@@ -57,12 +68,13 @@ class IptvProvider(
                 extra = mapOf("group" to g),
             )
         }
-        return out
+        groupCatalogs = catalogs
     }
 
+    override suspend fun catalogs(): List<CatalogRef> = groupCatalogs
+
     override suspend fun homeCatalogs(): List<CatalogRef> =
-        // Only put "All Channels" and top few groups on Home to avoid spam.
-        catalogs().take(5)
+        catalogs().take(6) // "All" + top 5 groups
 
     override suspend fun getCatalog(ref: CatalogRef, page: Int): List<MediaItem> {
         val filtered = when {
@@ -71,15 +83,18 @@ class IptvProvider(
                 channels.filter { it.group == ref.extra["group"] }
             else -> channels
         }
-        val pageSize = 50
-        val start = (page - 1).coerceAtLeast(0) * pageSize
+        val pageSize = 60
+        val start = ((page - 1).coerceAtLeast(0)) * pageSize
         return filtered.drop(start).take(pageSize).map { it.toMediaItem(config.id) }
     }
 
     override suspend fun search(query: String, page: Int): List<MediaItem> {
         val q = query.lowercase()
-        return channels.filter { it.name.lowercase().contains(q) }
+        return channels.asSequence()
+            .filter { it.name.lowercase().contains(q) }
+            .take(100)
             .map { it.toMediaItem(config.id) }
+            .toList()
     }
 
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> {
@@ -123,15 +138,15 @@ class IptvProvider(
     }
 
     private fun parsePlaylist(body: String): List<IptvChannel> {
-        val out = mutableListOf<IptvChannel>()
-        val lines = body.lines()
-        var i = 0
+        val out = ArrayList<IptvChannel>(512)
         var pendingName: String? = null
         var pendingLogo: String? = null
         var pendingGroup: String? = null
         var pendingTvgId: String? = null
-        while (i < lines.size) {
-            val line = lines[i].trim()
+
+        body.lineSequence().forEach { rawLine ->
+            if (out.size >= MAX_CHANNELS) return@forEach
+            val line = rawLine.trim()
             when {
                 line.startsWith("#EXTM3U") -> {
                     pendingGroup = extractAttr(line, "group-title") ?: pendingGroup
@@ -148,21 +163,20 @@ class IptvProvider(
                 }
                 line.isBlank() || line.startsWith("#") -> { /* skip */ }
                 else -> {
-                    // This line is a URL.
                     val url = line
-                    val name = pendingName ?: url.substringAfterLast('/').substringBefore('?')
+                    val name = pendingName
+                        ?: url.substringAfterLast('/').substringBefore('?').ifBlank { "Channel" }
                     out += IptvChannel(
                         id = "ch:" + (pendingTvgId ?: url.hashCode().toString()),
                         name = name,
                         logo = pendingLogo,
-                        group = pendingGroup,
+                        group = pendingGroup ?: "Other",
                         url = url,
                     )
                     pendingName = null
                     pendingLogo = null
                 }
             }
-            i++
         }
         return out
     }
@@ -170,5 +184,11 @@ class IptvProvider(
     private fun extractAttr(line: String, key: String): String? {
         val pattern = Regex("""$key="([^"]*)"""")
         return pattern.find(line)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
+    }
+
+    companion object {
+        private const val TAG = "StormIPTV"
+        private const val MAX_CHANNELS = 5000
+        private const val MAX_GROUPS = 100
     }
 }

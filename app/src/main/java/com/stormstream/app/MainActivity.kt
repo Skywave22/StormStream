@@ -17,17 +17,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
 import com.stormstream.app.data.AppViewModel
+import com.stormstream.app.data.Episode
 import com.stormstream.app.data.MediaItem
 import com.stormstream.app.ui.navigation.StormScreen
 import com.stormstream.app.ui.screens.*
 import com.stormstream.app.ui.theme.StormTheme
+import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,6 +54,18 @@ private fun StormAppRoot() {
         BottomTab(StormScreen.Settings, Icons.Default.Settings, "Settings"),
     )
     val viewModel: AppViewModel = viewModel()
+    val snackbarHost = remember { SnackbarHostState() }
+
+    // Collect one-shot error events and show a snackbar.
+    LaunchedEffect(Unit) {
+        viewModel.errors.collectLatest { msg ->
+            snackbarHost.showSnackbar(
+                message = msg,
+                duration = SnackbarDuration.Short,
+            )
+        }
+    }
+
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val showBottomBar = currentRoute in listOf(
@@ -63,15 +75,18 @@ private fun StormAppRoot() {
         StormScreen.Settings.route,
     )
 
-    // When an item is clicked, stash it in the VM (cross-screen state) and
-    // navigate to detail. Because ViewModel is activity-scoped, the detail
-    // screen reads the selected item directly.
     val onItemClick: (MediaItem) -> Unit = { item ->
         viewModel.openItem(item)
-        navController.navigate(StormScreen.Detail.create("item"))
+        navController.navigate(StormScreen.Detail.route)
+    }
+
+    val onPlay: (MediaItem, Episode?, Int) -> Unit = { item, ep, streamIdx ->
+        viewModel.startPlayback(item, ep, streamIdx)
+        navController.navigate(StormScreen.Player.route)
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHost) },
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
@@ -113,26 +128,22 @@ private fun StormAppRoot() {
                 ExtensionsScreen(viewModel = viewModel)
             }
             composable(StormScreen.Settings.route) {
-                SettingsScreen(
-                    onRefresh = { viewModel.refreshHome() }
-                )
+                SettingsScreen(viewModel = viewModel)
             }
-            composable(StormScreen.Detail.route,
-                arguments = listOf(navArgument(StormScreen.Detail.ARG_ITEM_ID) {
-                    type = NavType.StringType
-                })
-            ) {
+            composable(StormScreen.Detail.route) {
                 DetailScreen(
                     viewModel = viewModel,
-                    onPlay = { _, _ ->
-                        navController.navigate(StormScreen.Player.create("item", "null"))
-                    }
+                    onPlay = onPlay,
+                    onBack = { navController.popBackStack() }
                 )
             }
             composable(StormScreen.Player.route) {
                 PlayerScreen(
                     viewModel = viewModel,
-                    onBack = { navController.popBackStack() }
+                    onBack = {
+                        viewModel.clearPlayback()
+                        navController.popBackStack()
+                    }
                 )
             }
         }

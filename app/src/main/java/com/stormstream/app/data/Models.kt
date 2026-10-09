@@ -141,11 +141,26 @@ data class RepoPlugin(
     val providerType: String? = null,
 )
 
-/** Extension installed on the device: a record in Room/DataStore. */
+/** Extension installed on the device: a record in DataStore. */
 @Serializable
 data class InstalledExtension(
     val config: ProviderConfig,
     /** Local path to the file (plugin JAR/JS/JSON), null for remote-only addons like Stremio. */
     val localPath: String? = null,
+    /** For Stremio addons, the manifest URL; for IPTV, the playlist URL; for scrapers, the inline JSON is in localPath's file */
+    val sourceUrl: String? = config.sourceUrl,
+    /** Inline config (e.g. scraper JSON) so we don't need filesystem writes for small configs. */
+    val inlineConfig: String? = null,
     val installedAt: Long = System.currentTimeMillis(),
 )
+
+/** Identifies what the player should currently be playing. Held inside AppViewModel. */
+data class PlaybackTarget(
+    val item: MediaItem,
+    val episode: Episode?,
+    val streams: List<StreamSource>,
+    val selectedIndex: Int = 0,
+) {
+    val selectedStream: StreamSource?
+        get() = streams.getOrNull(selectedIndex)
+}

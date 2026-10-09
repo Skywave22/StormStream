@@ -1,26 +1,59 @@
 # StormStream ⚡
 
-**StormStream** — a universal streaming app for Android, inspired by Hikari.
-One player, every provider ecosystem:
+**StormStream** is a universal streaming app for Android, inspired by the
+Hikari concept — built from the ground up as a clean-room architecture that
+is faster, more resilient, and easier to extend.
 
 | # | Provider system | Status |
 |---|-----------------|--------|
 | 1 | **Stremio addons** (v3 manifest / catalog / meta / streams / subtitles) | ✅ fully working |
 | 2 | **Universal HTML/JSON scrapers** (no-code CSS-selector configs) | ✅ fully working |
 | 3 | **IPTV / M3U playlists** (group catalogs + HLS/DASH live playback) | ✅ fully working |
-| 4 | **CloudStream `.cs3` plugins** | 🔌 adapter scaffold (dex runtime slot) |
-| 5 | **Vega providers** (CommonJS modules) | 🔌 adapter scaffold (QuickJS slot) |
-| 6 | **SkyStream extensions** | 🔌 adapter scaffold |
-| 7 | **Sora extensions** | 🔌 adapter scaffold |
-| 8 | **Aniyomi extensions** | 🔌 adapter scaffold |
-| 9 | **Nuvio JS/QuickJS scrapers** | 🔌 adapter scaffold |
-| 10 | **Manga sources** | 🔌 adapter scaffold |
-| 11 | **Native Storm (`.storm`) extensions** | 🔌 adapter scaffold |
+| 4 | **CloudStream `.cs3` plugins** | 🔌 Phase 3 (dex runtime) |
+| 5 | **Vega providers** (CommonJS/QuickJS modules) | 🔌 Phase 3 |
+| 6 | **SkyStream / Sora / Aniyomi / Nuvio / Manga** | 🔌 Phase 3 |
+| 7 | **Native Storm (`.storm`) extensions** | 🔌 Phase 3 |
+
+## What's new in v0.2 (Phase 1)
+
+This build was a complete rewrite of the seed v0.1.0 (an AI-generated scaffold
+with ~28 critical bugs). Phase 1 fixes include:
+
+- 🧠 **Persistence** — installed extensions are saved to DataStore and restored
+  on cold start; no more "everything disappears on restart".
+- 🎬 **Working player** — the Player screen now actually receives the selected
+  stream/episode, builds a MediaSource with per-source HTTP headers, and
+  renders subtitles (VTT/SRT/ASS) via ExoPlayer's SubtitleConfiguration.
+- ⚡ **Concurrent home loading** — all catalogs load in parallel with per-call
+  timeouts so one slow addon never freezes the screen; results appear
+  progressively.
+- 🧰 **Async HTTP client** — OkHttp-backed with per-request timeouts, retries
+  on idempotent GETs, shared cookies/cache/UA, proper error return types
+  instead of throwing.
+- 🔍 **Debounced search** (300 ms) — no more network flood per keystroke; has a
+  loading state.
+- 🧱 **Lighter bootstrap** — first launch uses a small news M3U instead of the
+  20,000-channel iptv-org index that used to block the UI for 30+ seconds.
+- 🚫 **Adult-content toggle** in Settings (persisted).
+- ✅ **Enable/disable & uninstall** for every installed provider.
+- 🧭 **Correct navigation** — broken path args are gone; the ViewModel holds
+  the selected item/playback target.
+- 🧯 **Error snackbars** — network/parse/timeout failures surface in the UI
+  instead of silently disappearing.
+- 🎨 **Polished UI** — poster placeholders, loading indicators, episode
+  thumbnails, gradient backdrop, season grouping, stream chips with subtitle
+  badges, better cards, and a refresh button.
+- 🖼️ **Image loading** with Coil SubcomposeAsyncImage + placeholders and
+  letter fallbacks when posters fail to load.
+- 🔔 **Proper MediaSession** — PlaybackService owns an ExoPlayer with audio
+  focus, wake lock, and MediaSession for lock-screen / headset controls.
+- 🛑 **Parse caps** — IPTV parser is line-sequence and caps at 5000 channels /
+  100 groups to protect against runaway public playlists.
 
 ## Architecture
 
-StormStream is written in **100% Kotlin + Jetpack Compose** with **Material 3**
-in a dark, electric-blue theme. The core contract every backend implements is:
+100% Kotlin + Jetpack Compose with Material 3, dark-first navy/electric-blue
+theme. The core contract every backend implements:
 
 ```kotlin
 interface StreamProvider {
@@ -35,10 +68,9 @@ interface StreamProvider {
 }
 ```
 
-The UI, database, and player talk **only** to this interface — they never know
-which backend a `MediaItem` came from. Each ecosystem adapter lives under
-`providers/<type>/` and adapts that ecosystem's native protocol to
-`StreamProvider`.
+The UI, database, and player talk **only** to this interface. Each provider
+type lives under `providers/<type>/` and adapts its native protocol into this
+contract.
 
 ### Package layout
 
@@ -46,50 +78,53 @@ which backend a `MediaItem` came from. Each ecosystem adapter lives under
 app/src/main/java/com/stormstream/app/
 ├── StormApp.kt / MainActivity.kt        — entry points
 ├── core/Result.kt                       — StormResult / StormError
-├── data/                                — models, AppViewModel
-├── net/StormHttpClient.kt               — shared OkHttp client
+├── data/
+│   ├── Models.kt                        — MediaItem, Episode, StreamSource, etc.
+│   ├── AppViewModel.kt                  — single shared VM
+│   └── StormStore.kt                    — DataStore persistence
+├── net/StormHttpClient.kt               — shared async OkHttp client (retry/timeout)
 ├── providers/
 │   ├── StreamProvider.kt                — the universal contract
 │   ├── ProviderManager.kt               — registry + fan-out queries
-│   ├── plugin/PluginRepoManager.kt      — extension repo loader (.json repos)
+│   ├── plugin/PluginRepoManager.kt      — extension repo loader
 │   ├── stremio/StremioAddonProvider.kt  — ✅ Stremio v3 addon protocol
 │   ├── scraper/UniversalScraper…        — ✅ CSS-selector / JSON-API scrapers
 │   ├── iptv/IptvProvider.kt             — ✅ Extended M3U + groups
-│   ├── cs3/, vega/, skystream/, sora/,
-│   │   aniyomi/, nuvio/, manga/, storm/ — 🔌 adapter scaffolds
-├── player/PlaybackService.kt            — Media3 foreground service
+│   └── cs3/, vega/, skystream/, sora/,
+│       aniyomi/, nuvio/, manga/, storm/ — 🔌 adapter scaffolds (Phase 3)
+├── player/PlaybackService.kt            — MediaSession service + MediaSource factory
 └── ui/
     ├── theme/StormTheme.kt              — navy + electric-blue Material 3
     ├── navigation/Screens.kt
-    ├── components/                      — PosterCard, ContentRow, ChannelCard
+    ├── components/                      — PosterCard, ChannelCard, ContentRow
     └── screens/                         — Home, Search, Extensions, Settings,
-                                           Detail, Player (ExoPlayer)
+                                           Detail, Player
 ```
 
 ## Building
 
 1. Install Android Studio (Iguana or newer) with JDK 17.
 2. Open this folder as an existing Android Studio project.
-3. Let Gradle sync. Android Studio will download the Gradle wrapper, AGP, and
-   all dependencies (Compose BOM, Media3 1.4, OkHttp 4, Coil, JSoup,
-   kotlinx-serialization).
-4. Run the `app` configuration on an Android device or emulator (minSdk 24).
+3. Let Gradle sync (Compose BOM, Media3 1.4, OkHttp 4, Coil, JSoup,
+   kotlinx-serialization, DataStore).
+4. Run the `app` configuration on an Android device or emulator (minSdk 24,
+   targetSdk 35).
 
-On first launch StormStream bootstraps two public sources so Home isn't empty:
+On first launch StormStream bootstraps two lightweight seed sources so Home
+isn't empty:
 
-- Stremio Cinemeta catalog (`https://v3-cinemeta.strem.io/manifest.json`)
-- Public IPTV org playlist (`https://iptv-org.github.io/iptv/index.m3u`)
+- Stremio Cinemeta (`https://v3-cinemeta.strem.io/manifest.json`)
+- A small news M3U playlist from iptv-org
 
 Open the **Extensions** tab to add your own sources.
 
 ## Adding a provider
 
 ### Stremio addon
-Extensions → **Add** → *Stremio addon* → paste any `manifest.json` URL (community
-addon lists, your own, etc.).
+Extensions → **+** → *Stremio addon* → paste any `manifest.json` URL.
 
 ### Universal scraper
-Extensions → **Add** → *Universal scraper* → paste a JSON config:
+Extensions → **+** → *Universal JSON/HTML scraper* → paste a JSON config:
 
 ```json
 {
@@ -99,47 +134,48 @@ Extensions → **Add** → *Universal scraper* → paste a JSON config:
   "catalogs": [
     { "id": "home", "name": "Home", "type": "movie", "path": "/movies" }
   ],
-  "search": {
-    "path": "/search?q={query}"
-  },
+  "search": { "path": "/search?q={query}" },
   "detail": { "description": { "selector": ".desc" } }
 }
 ```
 
-Selectors default to common classes (`.item`, `.card`, `h2`) out of the box and
-can be overridden per-catalog. JSON-API mode is enabled with `"mode": "JSON"`
-and dotted-path field names.
+Default selectors (`.item`, `.card`, `h2`, `a`, `img`) work out of the box and
+can be overridden per-catalog. JSON-API mode is enabled with `"mode": "JSON"`.
 
 ### IPTV / M3U
-Extensions → **Add** → *IPTV playlist* → give it a name and paste an `.m3u` URL.
+Extensions → **+** → *IPTV / M3U playlist* → name + M3U URL.
 
 ### Extension repos
-Extensions → **Add repo** → paste a `repo.json` URL or a `github.com/owner/repo`
-shorthand. StormStream understands Hiki/Vega-style repos, CloudStream-style
-`pluginLists` manifests, and plain plugin arrays.
-
-### CloudStream / Vega / SkyStream / Sora / Aniyomi / Nuvio / Manga / Storm
-These adapter slots are present in `ProviderManager.installScaffold` and have
-matching source files, so repos and install UI enumerate them uniformly.
-Drop-in runtimes for each (QuickJS engine for JS-based ecosystems, dex
-classloaders for Kotlin-based ones) plug into the corresponding scaffold
-classes without changing anything else in the app.
+Extensions → **Add repo** FAB → paste a `repo.json` URL or a
+`github.com/owner/repo` shorthand. StormStream understands Hiki/Vega/Storm
+repos, CloudStream `pluginLists` manifests, and plain plugin arrays.
 
 ## Playback
 
-Playback uses AndroidX **Media3 ExoPlayer** with HLS, DASH, and progressive
-(MP4/MKV) support, per-source HTTP headers passed through to the data source,
-and a `MediaSessionService` for background playback / notification controls.
-Subtitles from Stremio addons are already parsed and plumbed to the
-`StreamSource.subtitles` field.
+- AndroidX **Media3 ExoPlayer** with HLS, DASH, progressive (MP4/MKV)
+- Per-source HTTP headers passed through to the data source
+- Subtitles (VTT/SRT/ASS) attached via `SubtitleConfiguration` and selectable
+  in the player's caption menu
+- Stream switcher chips for quick source changes during playback
+- Audio focus handled by the player; wake lock kept while playing
+- MediaSession service for background playback / notification controls
 
 ## Differences vs. Hikari
 
-This is a **clean-room build** — the architecture, naming, package layout,
-theme, and UI are original. It supports the same breadth of provider
-ecosystems because they all solve the same problem (discover + resolve streams),
-but they're adapted through StormStream's own `StreamProvider` contract rather
-than copied code.
+This is a **clean-room build** — architecture, naming, package layout,
+theme, and UI are original. The provider contract (`StreamProvider`) and its
+adapters are written from scratch for StormStream rather than ported from
+Hikari's codebase.
+
+## Roadmap
+
+- **Phase 2 (next)** — Watch history + "Continue watching" (Room), home hero
+  carousel, loading skeletons, TMDB metadata enrichment, season jump
+  selector, PiP support, better search filters.
+- **Phase 3** — Real plugin runtimes: CloudStream `.cs3` via dex classloader,
+  Vega/Nuvio via QuickJS, native `.storm` extension API.
+- **Phase 4** — Downloads/offline, Trakt/MAL sync, bookmarks lists, crash
+  logs & diagnostics, backup/restore, Chromecast.
 
 ## License
 

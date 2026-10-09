@@ -1,6 +1,5 @@
 package com.stormstream.app.ui.components
 
-import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -9,8 +8,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.stormstream.app.data.MediaItem
+import com.stormstream.app.data.MediaType
 
 @Composable
 fun ContentRow(
@@ -29,21 +30,41 @@ fun ContentRow(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column {
-                Text(title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
                 if (subtitle != null) {
-                    Text(subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            items(items, key = { it.id + "@" + it.providerId }) { item ->
-                if (item.type == com.stormstream.app.data.MediaType.IPTV) {
-                    ChannelCard(item = item, onClick = { onItemClick(item) },
-                        modifier = Modifier.width(280.dp))
-                } else {
+        if (items.any { it.type == MediaType.IPTV }) {
+            // IPTV channels render as horizontal cards
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(items, key = { it.id + "@" + it.providerId }) { item ->
+                    ChannelCard(
+                        item = item,
+                        onClick = { onItemClick(item) },
+                        modifier = Modifier.width(260.dp)
+                    )
+                }
+            }
+        } else {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(items, key = { it.id + "@" + it.providerId }) { item ->
                     PosterCard(item = item, onClick = { onItemClick(item) })
                 }
             }
