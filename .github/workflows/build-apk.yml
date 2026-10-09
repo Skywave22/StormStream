@@ -63,15 +63,30 @@ jobs:
           ls "$ANDROID_SDK_ROOT/build-tools"
 
       - name: Build debug APK
+        id: build_debug
+        continue-on-error: true
         run: |
           set -o pipefail
           gradle assembleDebug --stacktrace --no-daemon --console=plain 2>&1 | tee /tmp/build-debug.log
           EXIT=${PIPESTATUS[0]}
+          echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
+          # Print Kotlin errors as workflow annotations so they show up in the UI.
+          grep -nE "^e: " /tmp/build-debug.log | head -60 | while read line; do
+            FILE=$(echo "$line" | sed -E 's|^([^:]+:[0-9]+:[0-9]+):.*|\1|')
+            MSG=$(echo "$line" | sed -E 's|^[^:]+:[0-9]+:[0-9]+: (.*)|\1|')
+            echo "::error file=$FILE::$(echo "$MSG" | tr '\n' ' ')"
+          done
           echo "----- COMPILATION ERRORS -----"
-          grep -nE "^e: |^w: |^\* What went wrong|^> |FAILURE:|BUILD FAILED|Could not |error:|Exception|Caused by:" /tmp/build-debug.log | head -120 || true
+          grep -nE "^e: |^\* What went wrong|FAILURE:|BUILD FAILED|Could not |Caused by:" /tmp/build-debug.log | head -120 || true
           echo "----- TAIL -----"
           tail -250 /tmp/build-debug.log
-          exit $EXIT
+          exit 0
+
+      - name: Fail build on error
+        if: steps.build_debug.outputs.exit_code != '0'
+        run: |
+          echo "Debug build failed"
+          exit 1
 
       - name: Build release APK (unsigned)
         if: always()
