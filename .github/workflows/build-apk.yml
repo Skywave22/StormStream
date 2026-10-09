@@ -7,9 +7,6 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
-env:
-  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
 jobs:
   build:
     name: Build debug APK
@@ -27,33 +24,45 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Install Android SDK
+      # GitHub's ubuntu-latest runners already ship an Android SDK at $ANDROID_HOME
+      # with cmdline-tools pre-installed. We just need our target platform/build-tools.
+      - name: Install Android SDK components
         run: |
           set -e
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          CMDLINE_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
-          curl -fsSL -o /tmp/cmdline-tools.zip "$CMDLINE_URL"
-          unzip -q -d /tmp/cmdline-tools /tmp/cmdline-tools.zip
-          rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          mv /tmp/cmdline-tools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          SDK_BIN="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin"
+          if [ ! -x "$SDK_BIN/sdkmanager" ]; then
+            SDK_BIN="$ANDROID_SDK_ROOT/cmdline-tools/bin"
+          fi
+          export PATH="$SDK_BIN:$ANDROID_SDK_ROOT/platform-tools:$PATH"
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-          echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager --list_installed | head -n 30
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          add-job-summary: on-failure
-          gradle-version: "8.9"
-
-      - name: Build APKs
-        shell: bash -leo {0}
+      - name: Download Gradle wrapper JAR
         run: |
-          echo "PATH=$PATH"
-          which gradle
-          gradle --version
-          gradle assembleDebug assembleRelease --stacktrace --no-daemon --console=plain
+          set -e
+          mkdir -p gradle/wrapper
+          curl -fsSL -o gradle/wrapper/gradle-wrapper.jar \
+            "https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar"
+          chmod +x gradlew
+          ls -la gradle/wrapper/
+          ./gradlew --version
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle/libs.versions.toml') }}
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Build release APK (unsigned)
+        run: ./gradlew assembleRelease --stacktrace || true
 
       - name: Upload debug APK
         if: success()
