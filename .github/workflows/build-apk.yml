@@ -63,10 +63,30 @@ jobs:
           ls "$ANDROID_SDK_ROOT/build-tools"
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace --no-daemon
+        run: |
+          set -o pipefail
+          gradle assembleDebug --stacktrace --no-daemon --console=plain 2>&1 | tee /tmp/build-debug.log
+          EXIT=${PIPESTATUS[0]}
+          echo "----- COMPILATION ERRORS -----"
+          grep -nE "^e: |^w: |^\* What went wrong|^> |FAILURE:|BUILD FAILED|Could not |error:|Exception|Caused by:" /tmp/build-debug.log | head -120 || true
+          echo "----- TAIL -----"
+          tail -250 /tmp/build-debug.log
+          exit $EXIT
 
       - name: Build release APK (unsigned)
-        run: gradle assembleRelease --stacktrace --no-daemon || true
+        if: always()
+        run: |
+          gradle assembleRelease --stacktrace --no-daemon --console=plain > /tmp/build-release.log 2>&1 || true
+          tail -100 /tmp/build-release.log
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: /tmp/build-*.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload debug APK
         if: success()
