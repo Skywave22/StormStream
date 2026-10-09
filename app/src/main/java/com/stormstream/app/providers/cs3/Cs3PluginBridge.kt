@@ -1,6 +1,5 @@
 package com.stormstream.app.providers.cs3
 
-import com.stormstream.app.core.StormException
 import com.stormstream.app.data.*
 import com.stormstream.app.data.Episode
 import com.stormstream.app.data.MediaItem

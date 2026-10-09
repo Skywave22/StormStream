@@ -1,8 +1,6 @@
 package com.stormstream.app.providers.cs3
 
 import android.content.Context
-import com.stormstream.app.core.StormException
-import com.stormstream.app.core.StormResult
 import com.stormstream.app.data.*
 import com.stormstream.app.providers.StreamProvider
 import dalvik.system.DexClassLoader
@@ -67,7 +65,7 @@ class Cs3Provider(
                         break
                     }
                 }
-                if (!found) throw StormException("Invalid .cs3: no classes.jar/dex found")
+                if (!found) throw RuntimeException("Invalid .cs3: no classes.jar/dex found")
             }
         }
         val optDir = File(context.cacheDir, "cs3_opt").apply { mkdirs() }
@@ -86,7 +84,7 @@ class Cs3Provider(
             } catch (t: Throwable) { lastErr = t }
         }
         classLoader = cl
-        bridge = loaded ?: throw StormException(
+        bridge = loaded ?: throw RuntimeException(
             "Could not load CS3 plugin: ${lastErr?.message ?: "unknown class"}"
         )
     }

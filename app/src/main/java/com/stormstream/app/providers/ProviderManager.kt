@@ -13,18 +13,10 @@ import com.stormstream.app.data.ProviderType
 import com.stormstream.app.data.StreamSource
 import com.stormstream.app.data.StormStore
 import com.stormstream.app.net.StormHttpClient
-import com.stormstream.app.providers.aniyomi.AniyomiProvider
-import com.stormstream.app.providers.cs3.Cs3Provider
 import com.stormstream.app.providers.iptv.IptvProvider
-import com.stormstream.app.providers.manga.MangaProvider
-import com.stormstream.app.providers.nuvio.NuvioProvider
 import com.stormstream.app.providers.scraper.UniversalScraperConfig
 import com.stormstream.app.providers.scraper.UniversalScraperProvider
-import com.stormstream.app.providers.skystream.SkyStreamProvider
-import com.stormstream.app.providers.sora.SoraProvider
-import com.stormstream.app.providers.storm.StormNativeProvider
 import com.stormstream.app.providers.stremio.StremioAddonProvider
-import com.stormstream.app.providers.vega.VegaProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -271,17 +263,12 @@ class ProviderManager private constructor(
      *  These providers will register in the UI but return empty streams.
      */
     fun installScaffold(type: ProviderType, cfg: ProviderConfig) {
-        val p: StreamProvider = when (type) {
-            ProviderType.CS3 -> Cs3Provider(cfg)
-            ProviderType.VEGA -> VegaProvider(cfg)
-            ProviderType.SKYSTREAM -> SkyStreamProvider(cfg)
-            ProviderType.SORA -> SoraProvider(cfg)
-            ProviderType.ANIYOMI -> AniyomiProvider(cfg)
-            ProviderType.NUVIO -> NuvioProvider(cfg)
-            ProviderType.MANGA -> MangaProvider(cfg)
-            ProviderType.STORM -> StormNativeProvider(cfg)
-            ProviderType.STREMIO, ProviderType.UNIVERSAL_SCRAPER, ProviderType.IPTV -> return
-        }
+        // For scaffold types that don't yet have real loaders (skystream/sora/aniyomi/
+        // nuvio/manga/storm), register a no-op stub so the user sees the extension
+        // in the Installed list. CS3 and VEGA have real loaders reachable via the
+        // repo manager's download/install flow; scaffold here still creates a stub
+        // if invoked (e.g. from a manually-added source).
+        val p: StreamProvider = ScaffoldProvider(cfg)
         register(p)
         recordExtension(InstalledExtension(config = cfg, sourceUrl = cfg.baseUrl))
     }
