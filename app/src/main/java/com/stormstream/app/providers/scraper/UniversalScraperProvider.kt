@@ -21,6 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.net.URLEncoder
 
 /**
  * Universal no-code scraper provider.
@@ -66,7 +67,7 @@ class UniversalScraperProvider(
     override suspend fun search(query: String, page: Int): List<MediaItem> {
         val s = cfg.search ?: return emptyList()
         val url = buildUrl(s.path, page)
-            .replace("{query}", java.net.URLEncoder.encode(query, "UTF-8"))
+            .replace("{query}", URLEncoder.encode(query, "UTF-8"))
         return scrapeList(url, s.itemSelectors, MediaType.MOVIE)
     }
 

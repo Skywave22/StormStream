@@ -9,12 +9,12 @@ plugins {
 
 android {
     namespace = "com.stormstream.app"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.stormstream.app"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
     }
@@ -67,7 +67,6 @@ dependencies {
     implementation(libs.okhttp.logging)
     implementation(libs.coil.compose)
     implementation(libs.jsoup)
-    implementation(libs.gson)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 
@@ -77,9 +76,6 @@ dependencies {
     implementation(libs.media3.dash)
     implementation(libs.media3.hls)
     implementation(libs.media3.session)
-
-    implementation(libs.androidx.work.runtime.ktx)
-    implementation(libs.androidx.datastore.preferences)
 
     debugImplementation(platform(libs.androidx.compose.bom))
     debugImplementation(libs.androidx.compose.ui.tooling)

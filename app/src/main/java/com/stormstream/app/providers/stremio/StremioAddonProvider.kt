@@ -14,6 +14,7 @@ import com.stormstream.app.providers.StreamProvider
 import com.stormstream.app.util.StormJson
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.net.URLEncoder
 
 /**
  * Stremio addon adapter.
@@ -213,7 +214,7 @@ class StremioAddonProvider(
     }
 
     private fun encodeSearch(q: String): String =
-        java.net.URLEncoder.encode(q, "UTF-8")
+        URLEncoder.encode(q, "UTF-8")
 
     private fun baseUrlFrom(manifestUrl: String): String {
         // Strip the trailing /manifest.json to get the addon root.
