@@ -52,10 +52,11 @@ import java.io.File
  *  - Enable/disable/uninstall flows with state updates.
  */
 class ProviderManager private constructor(
-    private val context: Context,
+    @get:JvmName("getContextCompat") internal val ctx: Context,
     val http: StormHttpClient,
     private val store: StormStore,
 ) {
+    val context: android.content.Context get() = ctx
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val _providers = MutableStateFlow<Map<String, StreamProvider>>(emptyMap())

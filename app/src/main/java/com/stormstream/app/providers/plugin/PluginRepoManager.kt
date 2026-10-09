@@ -8,9 +8,12 @@ import com.stormstream.app.data.RepoIndex
 import com.stormstream.app.data.RepoPlugin
 import com.stormstream.app.net.StormHttpClient
 import com.stormstream.app.providers.ProviderManager
+import com.stormstream.app.providers.cs3.Cs3Manifest
+import com.stormstream.app.providers.cs3.Cs3Provider
 import com.stormstream.app.util.StormJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Loads third-party extension repos.
@@ -86,6 +89,36 @@ class PluginRepoManager(
             }
             ProviderType.IPTV -> {
                 providerManager.installIptvPlaylist(plugin.name, plugin.url).isOk
+            }
+            ProviderType.CS3 -> {
+                runCatching {
+                    val bytes = (http.getBytes(plugin.url, timeoutMs = 30_000L)
+                        as? StormHttpClient.StormHttpResult.Ok)?.body
+                        ?: return@runCatching false
+                    val dir = File(providerManager.context.filesDir, "cs3").apply { mkdirs() }
+                    val file = File(dir, "${plugin.name}.cs3")
+                    file.writeBytes(bytes)
+                    // Read embedded plugin.json if present, else use defaults.
+                    var manifest = Cs3Manifest(pluginName = plugin.name, version = plugin.version)
+                    runCatching {
+                        java.util.zip.ZipInputStream(file.inputStream()).use { zip ->
+                            while (true) {
+                                val entry = zip.nextEntry ?: break
+                                if (entry.name == "plugin.json") {
+                                    val txt = zip.bufferedReader().readText()
+                                    manifest = StormJson.decodeFromString<Cs3Manifest>(txt)
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    val prov = Cs3Provider(providerManager.context, http.client, file, manifest)
+                    providerManager.register(prov)
+                    true
+                }.getOrElse { t ->
+                    android.util.Log.e(TAG, "CS3 install failed: ${t.message}", t)
+                    false
+                }
             }
             else -> {
                 val types = plugin.tvTypes.mapNotNull { t ->
