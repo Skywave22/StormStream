@@ -51,16 +51,13 @@ jobs:
           gradle-version: "8.7"
 
       - name: Build debug APK
-        id: build_debug
-        continue-on-error: true
         run: |
           set +e
           set -o pipefail
           gradle assembleDebug --no-daemon --stacktrace --info --console=plain 2>&1 | tee build.log
           build_status=${PIPESTATUS[0]}
-          echo "exit_code=$build_status" >> "$GITHUB_OUTPUT"
           echo "Gradle assembleDebug exit code: $build_status"
-          exit 0
+          exit "$build_status"
 
       - name: Report build diagnostics
         if: always()
@@ -70,24 +67,31 @@ jobs:
             echo
             echo '```text'
             if [ -f build.log ]; then
-              grep -nE '^e: |^w: |^FAILURE:|^\* What went wrong|^> Task .* FAILED|BUILD FAILED|Caused by:' build.log | head -100 || echo "No compiler or Gradle diagnostics captured."
+              tail -n 180 build.log
             else
               echo "Build log was not created."
             fi
             echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          } >> "$GITHUB_STEP_SUMMARY"
           if [ -f build.log ]; then
-            grep -E '^e: |^FAILURE:|^\* What went wrong|^> Task .* FAILED|BUILD FAILED|Caused by:' build.log | head -60 | while IFS= read -r diagnostic; do
-              escaped=${diagnostic//'%'/'%25'}
-              escaped=${escaped//$'\r'/'%0D'}
-              escaped=${escaped//$'\n'/'%0A'}
-              echo "::error title=Build diagnostic::$escaped"
-            done
+            context=$(grep -n -A35 -B3 -E '^e: |^FAILURE:|^\\* What went wrong:' build.log | head -160 || true)
+            if [ -z "$context" ]; then
+              context=$(tail -n 40 build.log)
+            fi
+            escaped=${context//'%'/'%25'}
+            escaped=${escaped//$'\r'/'%0D'}
+            escaped=${escaped//$'\n'/'%0A'}
+            echo "::error title=Gradle failure details::$escaped"
           fi
 
-      - name: Fail when debug build fails
-        if: steps.build_debug.outcome == 'failure'
-        run: exit 1
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stormstream-build-log
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Build release APK (unsigned)
         run: gradle assembleRelease --no-daemon || true
