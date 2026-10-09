@@ -62,26 +62,30 @@ jobs:
       - name: Report build diagnostics
         if: always()
         run: |
+          diagnostic_pattern='^e: |^FAILURE:|^\* What went wrong:|^Execution failed for task|^> Task .* FAILED|^BUILD FAILED|^Caused by:'
           {
             echo "## Debug APK build diagnostics"
             echo
+            echo '### Compiler and Gradle errors'
             echo '```text'
             if [ -f build.log ]; then
-              tail -n 180 build.log
+              grep -nE "$diagnostic_pattern" build.log | tail -n 120 || echo "No concise diagnostics found; see the log tail below."
             else
               echo "Build log was not created."
             fi
             echo '```'
+            echo
+            echo '### Build log tail'
+            echo '```text'
+            if [ -f build.log ]; then tail -n 100 build.log; else echo "No build log."; fi
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           if [ -f build.log ]; then
-            context=$(grep -n -A35 -B3 -E '^e: |^FAILURE:|^\\* What went wrong:' build.log | head -160 || true)
-            if [ -z "$context" ]; then
-              context=$(tail -n 40 build.log)
-            fi
-            escaped=${context//'%'/'%25'}
-            escaped=${escaped//$'\r'/'%0D'}
-            escaped=${escaped//$'\n'/'%0A'}
-            echo "::error title=Gradle failure details::$escaped"
+            while IFS= read -r diagnostic; do
+              escaped=${diagnostic//'%'/'%25'}
+              escaped=${escaped//$'\r'/'%0D'}
+              echo "::error title=Build diagnostic::$escaped"
+            done < <(grep -nE "$diagnostic_pattern" build.log | tail -n 60 || true)
           fi
 
       - name: Upload build log
