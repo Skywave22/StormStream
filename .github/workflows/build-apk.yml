@@ -7,6 +7,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+env:
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
 jobs:
   build:
     name: Build debug APK
@@ -19,22 +22,26 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android licenses & install required SDK components
+      - name: Install Android SDK (cmdline-tools, platform, build-tools)
         run: |
           set -e
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-              "platforms;android-35" \
-              "build-tools;35.0.0" \
-              "platform-tools"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          CMDLINE_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+          curl -fsSL -o /tmp/cmdline-tools.zip "$CMDLINE_URL"
+          unzip -q -d /tmp/cmdline-tools /tmp/cmdline-tools.zip
+          # Unzipped content lives under cmdline-tools/ — rename to latest/.
+          rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          mv /tmp/cmdline-tools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+          ls "$ANDROID_SDK_ROOT"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -44,12 +51,10 @@ jobs:
       - name: Generate Gradle wrapper (if missing)
         run: |
           set -e
-          chmod +x gradlew || true
-          # Extract the Gradle version we pinned in gradle-wrapper.properties.
           GRADLE_VERSION=$(sed -n 's/.*gradle-\([0-9.]*\)-bin.zip.*/\1/p' gradle/wrapper/gradle-wrapper.properties | head -1)
           echo "Pinned Gradle version: $GRADLE_VERSION"
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            echo "gradle-wrapper.jar missing — generating it with a temporary Gradle install."
+            echo "gradle-wrapper.jar missing — generating it..."
             curl -fsSL -o /tmp/gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
             unzip -q -d /tmp /tmp/gradle.zip
             /tmp/gradle-${GRADLE_VERSION}/bin/gradle wrapper --gradle-version "${GRADLE_VERSION}"
