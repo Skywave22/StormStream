@@ -1,66 +1,101 @@
 package com.stormstream.app.ui.theme
 
 import android.app.Activity
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-/**
- * StormStream visual identity — deep navy + electric blue accent, not a clone
- * of Hikari's Material 3 purple palette. Designed for dark-first TV/browsing.
- */
-private val StormDark = darkColorScheme(
-    primary = Color(0xFF60A5FA),      // electric-blue
-    onPrimary = Color(0xFF0B1220),
-    primaryContainer = Color(0xFF1E3A8A),
-    onPrimaryContainer = Color(0xFFDBEAFE),
-    secondary = Color(0xFF38BDF8),
-    onSecondary = Color(0xFF0B1220),
-    background = Color(0xFF070B15),
-    onBackground = Color(0xFFE2E8F0),
-    surface = Color(0xFF0F172A),
-    onSurface = Color(0xFFE2E8F0),
-    surfaceVariant = Color(0xFF1E293B),
-    onSurfaceVariant = Color(0xFF94A3B8),
-    outline = Color(0xFF334155),
-    error = Color(0xFFF87171),
+private val DarkColorScheme = darkColorScheme(
+    primary = Color(0xFF3FA9FF),
+    onPrimary = Color(0xFF001E31),
+    primaryContainer = Color(0xFF004C75),
+    onPrimaryContainer = Color(0xFFCAE6FF),
+    secondary = Color(0xFFB4C8DA),
+    onSecondary = Color(0xFF1F323F),
+    secondaryContainer = Color(0xFF354957),
+    onSecondaryContainer = Color(0xFFD0E4F7),
+    tertiary = Color(0xFFFFB3AC),
+    onTertiary = Color(0xFF5F1315),
+    tertiaryContainer = Color(0xFF7E2A29),
+    onTertiaryContainer = Color(0xFFFFDAD6),
+    background = Color(0xFF0A0F14),
+    onBackground = Color(0xFFE1E2E5),
+    surface = Color(0xFF11161C),
+    onSurface = Color(0xFFE1E2E5),
+    surfaceVariant = Color(0xFF1B232C),
+    onSurfaceVariant = Color(0xFFBFC8D2),
+    surfaceTint = Color(0xFF3FA9FF),
+    outline = Color(0xFF3A4550),
+    outlineVariant = Color(0xFF2A3540),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
+    inverseOnSurface = Color(0xFF11161C),
+    inverseSurface = Color(0xFFE1E2E5),
+    inversePrimary = Color(0xFF006599),
 )
 
-private val StormLight = lightColorScheme(
-    primary = Color(0xFF1E3A8A),
+private val LightColorScheme = lightColorScheme(
+    primary = Color(0xFF006599),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFDBEAFE),
-    onPrimaryContainer = Color(0xFF0B1220),
-    secondary = Color(0xFF0284C7),
-    background = Color(0xFFF8FAFC),
-    surface = Color.White,
+    primaryContainer = Color(0xFFCAE6FF),
+    onPrimaryContainer = Color(0xFF001E31),
+    secondary = Color(0xFF50606E),
+    background = Color(0xFFFAFCFF),
+    surface = Color(0xFFF5F9FF),
 )
 
 @Composable
 fun StormTheme(
-    darkTheme: Boolean = true, // streaming UIs default dark
-    content: @Composable () -> Unit,
+    darkTheme: Boolean = true, // dark-by-default cinematic UI
+    dynamicColor: Boolean = false,
+    content: @Composable () -> Unit
 ) {
-    val colors = if (darkTheme) StormDark else StormLight
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val ctx = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+        }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
+
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = Color.Transparent.toArgb()
-            window.navigationBarColor = colors.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = false
+            controller.isAppearanceLightNavigationBars = false
         }
     }
+
     MaterialTheme(
-        colorScheme = colors,
-        typography = androidx.compose.material3.Typography(),
-        content = content,
+        colorScheme = colorScheme,
+        typography = StormTypography,
+        shapes = StormShapes,
+        content = content
     )
 }
+
+val StormShapes = Shapes(
+    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
+    small = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(32.dp),
+)
+
+val StormTypography = Typography(
+    displayLarge = MaterialTheme.typography.displayLarge.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+    headlineLarge = MaterialTheme.typography.headlineLarge.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+    headlineMedium = MaterialTheme.typography.headlineMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+    titleLarge = MaterialTheme.typography.titleLarge.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+    titleMedium = MaterialTheme.typography.titleMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
+    labelLarge = MaterialTheme.typography.labelLarge.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+)

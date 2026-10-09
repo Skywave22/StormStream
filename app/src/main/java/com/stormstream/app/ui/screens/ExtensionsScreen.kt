@@ -1,394 +1,338 @@
 package com.stormstream.app.ui.screens
 
-import androidx.compose.foundation.*
+import androidx.compose.animation.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stormstream.app.data.AppViewModel
-import com.stormstream.app.data.ProviderType
+import com.stormstream.app.data.ProviderConfig
+import com.stormstream.app.data.RepoIndex
 import com.stormstream.app.data.RepoPlugin
+import com.stormstream.app.providers.StreamProvider
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExtensionsScreen(viewModel: AppViewModel = viewModel()) {
-    val providers by viewModel.providers.collectAsState()
+fun ExtensionsScreen(
+    onBack: () -> Unit,
+    viewModel: AppViewModel = viewModel(),
+) {
+    var tab by remember { mutableIntStateOf(0) }
+    val installed by viewModel.providers.collectAsState()
     val repos by viewModel.repos.collectAsState()
+    val busy = remember { mutableStateOf(false) }
+    val busyWhat = remember { mutableStateOf("") }
 
-    var addDialog: AddDialogKind? by remember { mutableStateOf(null) }
+    // Wrap install operations to show a busy spinner (ANR UX fix).
+    suspend fun <T> withBusy(label: String, block: suspend () -> T): T {
+        busy.value = true
+        busyWhat.value = label
+        return try { block() } finally { busy.value = false; busyWhat.value = "" }
+    }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { Text("Extensions", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-                actions = {
-                    IconButton(onClick = { addDialog = AddDialogKind.MENU }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add")
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+            )
+        }
+    ) { inner ->
+        Box(Modifier.fillMaxSize().padding(inner)) {
+            Column(Modifier.fillMaxSize()) {
+                TabRow(
+                    selectedTabIndex = tab,
+                    containerColor = Color.Transparent,
+                    divider = {}
+                ) {
+                    listOf("Installed", "Add URL", "Repos").forEachIndexed { i, t ->
+                        Tab(selected = tab == i, onClick = { tab = i },
+                            text = { Text(t, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal) })
                     }
                 }
-            )
-        },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { addDialog = AddDialogKind.REPO },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) {
-                Icon(Icons.Default.Extension, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Add repo")
-            }
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                Text(
-                    "Installed (${providers.size})",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.height(8.dp))
+                when (tab) {
+                    0 -> InstalledList(installed = installed, onRemove = { id ->
+                        viewModel.uninstallProvider(id)
+                    })
+                    1 -> AddUrlPanel(
+                        onAddStremio = { url ->
+                            withBusy("Adding Stremio addon") {
+                                val ok = suspendFun { done -> viewModel.installStremio(url, done) }
+                                // error shown via snackbar in MainActivity
+                            }
+                        },
+                        onAddScraper = { json ->
+                            withBusy("Installing scraper") {
+                                suspendFun { done -> viewModel.installScraper(json, done) }
+                            }
+                        },
+                        onAddIptv = { name, url ->
+                            withBusy("Adding IPTV list") {
+                                suspendFun { done -> viewModel.installIptv(name, url, done) }
+                            }
+                        },
+                        busy = busy.value,
+                        busyLabel = busyWhat.value
+                    )
+                    2 -> ReposPanel(
+                        repos = repos,
+                        onAddRepo = { url ->
+                            withBusy("Adding repo") {
+                                suspendFun { done -> viewModel.addRepo(url, done) }
+                            }
+                        },
+                        onInstall = { plugin ->
+                            withBusy("Installing ${plugin.name}") {
+                                viewModel.installPlugin(plugin)
+                            }
+                        },
+                        busy = busy.value,
+                        busyLabel = busyWhat.value
+                    )
+                }
             }
 
-            if (providers.isEmpty()) {
-                item {
+            if (busy.value) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.6f),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Column(
+                        Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(12.dp))
+                        Text(busyWhat.value, color = Color.White, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private suspend fun suspendFun(block: ((Boolean) -> Unit) -> Unit): Boolean {
+    return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        block { ok ->
+            if (cont.isActive) cont.resume(kotlin.Result.success(ok)) { _, _, _ -> }
+        }
+    }.getOrThrow()
+}
+
+@Composable
+private fun InstalledList(installed: List<StreamProvider>, onRemove: (String) -> Unit) {
+    if (installed.isEmpty()) {
+        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.ExtensionOff, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                Text("No extensions installed", style = MaterialTheme.typography.titleMedium)
+                Text("Add Stremio addons, JSON scrapers, or plugin repos via the other tabs.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
+        return
+    }
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        items(installed, key = { it.config.id }) { p ->
+            val c = p.config
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                        modifier = Modifier.size(44.dp)) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                c.name.first().uppercaseChar().toString(),
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(c.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                        val meta = listOf(c.type.name.lowercase(), c.version).filterNotNull().joinToString(" · ")
+                        Text(meta,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1)
+                    }
+                    IconButton(onClick = { onRemove(c.id) }) {
+                        Icon(Icons.Default.Delete, "Remove", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddUrlPanel(
+    onAddStremio: suspend (String) -> Unit,
+    onAddScraper: suspend (String) -> Unit,
+    onAddIptv: suspend (String, String) -> Unit,
+    busy: Boolean,
+    busyLabel: String,
+) {
+    val scope = rememberCoroutineScope()
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        var stremioUrl by remember { mutableStateOf("") }
+        var scraperJson by remember { mutableStateOf("") }
+        var iptvName by remember { mutableStateOf("") }
+        var iptvUrl by remember { mutableStateOf("") }
+
+        Text("Stremio addon", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        OutlinedTextField(
+            value = stremioUrl,
+            onValueChange = { stremioUrl = it },
+            label = { Text("Manifest URL") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            placeholder = { Text("https://.../manifest.json") }
+        )
+        Button(
+            onClick = { scope.launch { onAddStremio(stremioUrl.trim()) } },
+            enabled = stremioUrl.isNotBlank() && !busy,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add Stremio addon")
+        }
+
+        HorizontalDivider()
+
+        Text("Universal scraper (JSON)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        OutlinedTextField(
+            value = scraperJson,
+            onValueChange = { scraperJson = it },
+            label = { Text("Paste JSON rule") },
+            modifier = Modifier.fillMaxWidth().height(140.dp),
+            shape = RoundedCornerShape(14.dp)
+        )
+        Button(
+            onClick = { scope.launch { onAddScraper(scraperJson) } },
+            enabled = scraperJson.isNotBlank() && !busy,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        ) { Text("Install scraper") }
+
+        HorizontalDivider()
+
+        Text("IPTV playlist", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        OutlinedTextField(value = iptvName, onValueChange = { iptvName = it },
+            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            shape = RoundedCornerShape(14.dp))
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(value = iptvUrl, onValueChange = { iptvUrl = it },
+            label = { Text("M3U URL") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            shape = RoundedCornerShape(14.dp))
+        Button(
+            onClick = { scope.launch { onAddIptv(iptvName.trim(), iptvUrl.trim()) } },
+            enabled = iptvName.isNotBlank() && iptvUrl.isNotBlank() && !busy,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        ) { Text("Add playlist") }
+    }
+}
+
+@Composable
+private fun ReposPanel(
+    repos: Map<String, RepoIndex>,
+    onAddRepo: suspend (String) -> Unit,
+    onInstall: (RepoPlugin) -> Unit,
+    busy: Boolean,
+    busyLabel: String,
+) {
+    val scope = rememberCoroutineScope()
+    var repoUrl by remember { mutableStateOf("") }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text("Plugin repos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        OutlinedTextField(value = repoUrl, onValueChange = { repoUrl = it },
+            label = { Text("Repo index URL") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            shape = RoundedCornerShape(14.dp))
+        Button(
+            onClick = { scope.launch { onAddRepo(repoUrl.trim()) } },
+            enabled = repoUrl.isNotBlank() && !busy,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        ) { Text("Add repo") }
+
+        if (repos.isEmpty()) {
+            Text("No repos added. Add a repo index to browse and install plugins.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        } else {
+            repos.forEach { (url, idx) ->
+                Text(idx.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                idx.plugins.forEach { plugin ->
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(Modifier.padding(20.dp)) {
-                            Text(
-                                "No extensions yet",
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "Tap the + button to add a Stremio addon, M3U playlist, universal scraper, or extension repo.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-
-            items(providers.values.toList(), key = { it.config.id }) { p ->
-                var enabled by remember(p.config.id, p.config.enabled) {
-                    mutableStateOf(p.config.enabled)
-                }
-                ElevatedCard(
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        ProviderBadge(p.config.type)
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                p.config.name,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                buildString {
-                                    append(p.config.type.key)
-                                    p.config.version?.let { append(" · v$it") }
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Switch(
-                                checked = enabled,
-                                onCheckedChange = {
-                                    enabled = it
-                                    viewModel.toggleProviderEnabled(p.config.id, it)
-                                }
-                            )
-                            IconButton(onClick = {
-                                viewModel.uninstallProvider(p.config.id)
-                            }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Uninstall",
-                                    tint = MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (repos.isNotEmpty()) {
-                item {
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "Added repos",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-                repos.forEach { (url, idx) ->
-                    item {
-                        ElevatedCard(
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(Modifier.padding(16.dp)) {
-                                Text(
-                                    idx.name ?: url,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                if (!idx.description.isNullOrBlank()) {
-                                    Text(
-                                        idx.description,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Spacer(Modifier.height(8.dp))
-                                idx.plugins.take(6).forEach { plug: RepoPlugin ->
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            "• ${plug.name}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        TextButton(
-                                            onClick = { viewModel.installPlugin(plug) }
-                                        ) { Text("Install") }
-                                    }
-                                }
-                                if (idx.plugins.size > 6) {
-                                    Text(
-                                        "+ ${idx.plugins.size - 6} more",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                        Row(Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text(plugin.name, fontWeight = FontWeight.SemiBold)
+                                Text(plugin.version + " · " + plugin.type, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (plugin.description != null) {
+                                    Text(plugin.description!!, style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2)
                                 }
                             }
+                            Button(
+                                onClick = { onInstall(plugin) },
+                                enabled = !busy,
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("Install", fontSize = 12.sp) }
                         }
                     }
                 }
             }
         }
     }
-
-    // Dialogs
-    when (addDialog) {
-        AddDialogKind.MENU -> AddSourceMenu(
-            onDismiss = { addDialog = null },
-            onPick = { addDialog = it }
-        )
-        AddDialogKind.STREMIO -> AddUrlDialog(
-            title = "Add Stremio addon",
-            label = "manifest.json URL",
-            placeholder = "https://v3-cinemeta.strem.io/manifest.json",
-            onDismiss = { addDialog = null },
-            onConfirm = { url -> viewModel.installStremio(url) { addDialog = null } }
-        )
-        AddDialogKind.IPTV -> AddIptvDialog(
-            onDismiss = { addDialog = null },
-            onConfirm = { name, url -> viewModel.installIptv(name, url) { addDialog = null } }
-        )
-        AddDialogKind.SCRAPER -> AddScraperDialog(
-            onDismiss = { addDialog = null },
-            onConfirm = { json -> viewModel.installScraper(json) { addDialog = null } }
-        )
-        AddDialogKind.REPO -> AddUrlDialog(
-            title = "Add extension repo",
-            label = "repo.json URL (or github.com/owner/repo)",
-            placeholder = "https://raw.githubusercontent.com/.../repo.json",
-            onDismiss = { addDialog = null },
-            onConfirm = { url -> viewModel.addRepo(url) { addDialog = null } }
-        )
-        null -> {}
-    }
-}
-
-enum class AddDialogKind { MENU, STREMIO, IPTV, SCRAPER, REPO }
-
-@Composable
-private fun ProviderBadge(type: ProviderType) {
-    val scheme = MaterialTheme.colorScheme
-    val (label, color, textColor) = when (type) {
-        ProviderType.STREMIO -> Triple("ST", scheme.primary, scheme.onPrimary)
-        ProviderType.UNIVERSAL_SCRAPER -> Triple("SC", scheme.secondary, scheme.onSecondary)
-        ProviderType.CS3 -> Triple("CS3", scheme.tertiary, scheme.onTertiary)
-        ProviderType.VEGA -> Triple("VG", scheme.error, scheme.onError)
-        ProviderType.SKYSTREAM -> Triple("SK", scheme.primaryContainer, scheme.onPrimaryContainer)
-        ProviderType.SORA -> Triple("SO", scheme.secondaryContainer, scheme.onSecondaryContainer)
-        ProviderType.ANIYOMI -> Triple("AN", scheme.errorContainer, scheme.onErrorContainer)
-        ProviderType.NUVIO -> Triple("NU", scheme.tertiaryContainer, scheme.onTertiaryContainer)
-        ProviderType.IPTV -> Triple("TV", scheme.primary, scheme.onPrimary)
-        ProviderType.MANGA -> Triple("MG", scheme.secondary, scheme.onSecondary)
-        ProviderType.STORM -> Triple("SS", scheme.tertiary, scheme.onTertiary)
-    }
-    Surface(color = color, shape = RoundedCornerShape(10.dp)) {
-        Text(
-            label,
-            color = textColor,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold
-        )
-    }
-}
-
-@Composable
-private fun AddSourceMenu(onDismiss: () -> Unit, onPick: (AddDialogKind) -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add source", fontWeight = FontWeight.Bold) },
-        text = {
-            Column {
-                MenuItemBtn("Stremio addon (manifest URL)") { onPick(AddDialogKind.STREMIO) }
-                MenuItemBtn("Universal JSON/HTML scraper") { onPick(AddDialogKind.SCRAPER) }
-                MenuItemBtn("IPTV / M3U playlist") { onPick(AddDialogKind.IPTV) }
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                MenuItemBtn("Add extension repo (CloudStream / Vega / Storm)") {
-                    onPick(AddDialogKind.REPO)
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
-}
-
-@Composable
-private fun MenuItemBtn(text: String, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-    ) {
-        Text(text, style = MaterialTheme.typography.bodyLarge)
-    }
-}
-
-@Composable
-private fun AddUrlDialog(
-    title: String,
-    label: String,
-    placeholder: String,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    var text by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, fontWeight = FontWeight.Bold) },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text(label) },
-                placeholder = { Text(placeholder) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (text.isNotBlank()) onConfirm(text.trim()) },
-                enabled = text.isNotBlank()
-            ) { Text("Add") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
-}
-
-@Composable
-private fun AddIptvDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var url by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add IPTV playlist", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Playlist name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                )
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    label = { Text("M3U URL") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (name.isNotBlank() && url.isNotBlank()) onConfirm(name.trim(), url.trim())
-                },
-                enabled = name.isNotBlank() && url.isNotBlank()
-            ) { Text("Add") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
-}
-
-@Composable
-private fun AddScraperDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var json by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add universal scraper", fontWeight = FontWeight.Bold) },
-        text = {
-            OutlinedTextField(
-                value = json,
-                onValueChange = { json = it },
-                label = { Text("JSON configuration") },
-                placeholder = {
-                    Text("""{"name":"MySite","baseUrl":"https://...","mode":"HTML",...}""")
-                },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp),
-                maxLines = 14,
-                shape = RoundedCornerShape(12.dp),
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (json.isNotBlank()) onConfirm(json.trim()) },
-                enabled = json.isNotBlank()
-            ) { Text("Add") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
 }

@@ -28,6 +28,7 @@ class StormStore(private val context: Context) {
 
         private val KEY_ADULT = booleanPreferencesKey("adult_content")
         private val KEY_INCOGNITO = booleanPreferencesKey("incognito")
+        private val KEY_PLAYER_ENGINE = stringPreferencesKey("player_engine")
         private val KEY_EXTENSIONS = stringPreferencesKey("extensions_json")
         private val KEY_BOOTSTRAPPED = booleanPreferencesKey("bootstrapped_v1")
         private val KEY_HISTORY = stringPreferencesKey("history_json")
@@ -56,6 +57,14 @@ class StormStore(private val context: Context) {
 
     suspend fun setIncognito(enabled: Boolean) {
         context.dataStore.edit { it[KEY_INCOGNITO] = enabled }
+    }
+
+    val playerEngine: Flow<String> = context.dataStore.data.map {
+        it[KEY_PLAYER_ENGINE] ?: "mpv"
+    }
+
+    suspend fun setPlayerEngine(type: String) {
+        context.dataStore.edit { it[KEY_PLAYER_ENGINE] = type }
     }
 
     // --- bootstrap flag ---
@@ -165,5 +174,9 @@ class StormStore(private val context: Context) {
             ListSerializer(BookmarkEntry.serializer()), list
         )
         context.dataStore.edit { it[KEY_BOOKMARKS] = json }
+    }
+
+    suspend fun clearBookmarks() {
+        context.dataStore.edit { it.remove(KEY_BOOKMARKS) }
     }
 }

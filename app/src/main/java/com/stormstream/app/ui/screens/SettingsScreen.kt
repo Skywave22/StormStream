@@ -1,292 +1,237 @@
 package com.stormstream.app.ui.screens
 
-import androidx.compose.foundation.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stormstream.app.data.AppViewModel
-import com.stormstream.app.data.ProviderType
+import com.stormstream.app.player.engine.PlayerEngine
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    onBack: () -> Unit,
     viewModel: AppViewModel = viewModel(),
 ) {
     val adult by viewModel.adultEnabled.collectAsState()
     val incognito by viewModel.incognitoEnabled.collectAsState()
-    val providers by viewModel.providers.collectAsState()
-    val history by viewModel.history.collectAsState()
-    val bookmarks by viewModel.bookmarks.collectAsState()
-    var showAbout by remember { mutableStateOf(false) }
-    var confirmClearHistory by remember { mutableStateOf(false) }
+    val enginePref by viewModel.playerEngineType.collectAsState()
+
+    val mpvAvail = remember { PlayerEngine.isMpvAvailable() }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { Text("Settings", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) { inner ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item {
-                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.FlashOn,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                "StormStream",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "v0.2.0 · universal streaming engine",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+            // App card
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            ) {
+                Row(
+                    Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f), modifier = Modifier.size(56.dp)) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("⛈", fontSize = 28.sp)
                         }
                     }
-                }
-            }
-
-            item {
-                Text(
-                    "Content & privacy",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.height(4.dp))
-            }
-
-            item {
-                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                     Column {
-                        SettingSwitch(
-                            title = "Show adult content",
-                            subtitle = "Include NSFW providers and titles in results",
-                            checked = adult,
-                            onChecked = { viewModel.setAdultEnabled(it); viewModel.refreshHome() }
-                        )
-                        HorizontalDivider()
-                        SettingSwitch(
-                            title = "Incognito mode",
-                            subtitle = "Don't save watch history while enabled",
-                            checked = incognito,
-                            onChecked = { viewModel.setIncognito(it) },
-                            icon = if (incognito) Icons.Default.VisibilityOff
-                                   else Icons.Default.Visibility
-                        )
-                        HorizontalDivider()
-                        SettingAction(
-                            title = "Refresh home",
-                            subtitle = "Re-fetch catalogs from all enabled providers",
-                            icon = Icons.Default.Refresh,
-                            onClick = { viewModel.refreshHome() }
-                        )
+                        Text("StormStream", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                        Text("Universal streaming — libmpv & ExoPlayer",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
 
-            item {
-                Text(
-                    "Data",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.height(4.dp))
-            }
-
-            item {
-                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                    Column {
-                        SettingAction(
-                            title = "Clear watch history",
-                            subtitle = "${history.size} item(s) saved",
-                            icon = Icons.Default.DeleteSweep,
-                            onClick = { confirmClearHistory = true }
-                        )
-                    }
-                }
-            }
-
-            item {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Installed: ${providers.size} provider(s) · " +
-                    "${history.size} history · ${bookmarks.size} bookmarked",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.height(4.dp))
-                val working = providers.values.count {
-                    it.config.type in setOf(
-                        ProviderType.STREMIO,
-                        ProviderType.UNIVERSAL_SCRAPER,
-                        ProviderType.IPTV
+            // Player
+            SettingsGroup(title = "Player", icon = Icons.Default.PlayCircle) {
+                var engineExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(expanded = engineExpanded, onExpandedChange = { engineExpanded = it }) {
+                    OutlinedTextField(
+                        value = when (enginePref) {
+                            "mpv" -> "libmpv (recommended)"
+                            else -> "ExoPlayer (compatibility)"
+                        },
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Player engine") },
+                        leadingIcon = { Icon(Icons.Default.SmartDisplay, null) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = engineExpanded) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        shape = RoundedCornerShape(14.dp)
                     )
+                    ExposedDropdownMenu(expanded = engineExpanded, onDismissRequest = { engineExpanded = false }) {
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text("libmpv (recommended)")
+                                    Text(
+                                        if (mpvAvail) "libmpv detected on device" else "Native lib not bundled — will fall back to ExoPlayer",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            },
+                            onClick = { viewModel.setPlayerEngine("mpv"); engineExpanded = false },
+                            enabled = true
+                        )
+                        DropdownMenuItem(
+                            text = { Text("ExoPlayer (compatibility)") },
+                            onClick = { viewModel.setPlayerEngine("exo"); engineExpanded = false }
+                        )
+                    }
                 }
-                val scaffolds = providers.size - working
-                Text(
-                    "$working fully working · $scaffolds plugin adapters (Phase 3)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                SettingSwitch(
+                    title = "Incognito mode",
+                    subtitle = "Don't save watch history",
+                    icon = Icons.Default.VisibilityOff,
+                    checked = incognito,
+                    onChecked = { viewModel.setIncognito(it) }
                 )
             }
 
-            item {
-                Spacer(Modifier.height(8.dp))
-                TextButton(onClick = { showAbout = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Info, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("About StormStream")
-                }
+            // Content
+            SettingsGroup(title = "Content", icon = Icons.Default.Movie) {
+                SettingSwitch(
+                    title = "Adult content",
+                    subtitle = "Show adult-rated results",
+                    icon = Icons.Default.EighteenUpRating,
+                    checked = adult,
+                    onChecked = { viewModel.setAdultEnabled(it) }
+                )
             }
+
+            // Data
+            SettingsGroup(title = "Data", icon = Icons.Default.Storage) {
+                SettingRow(
+                    title = "Clear history",
+                    subtitle = "Remove all watch-progress entries",
+                    icon = Icons.Default.HistoryToggleOff,
+                    onClick = { viewModel.clearHistory() }
+                )
+                SettingRow(
+                    title = "Clear bookmarks",
+                    subtitle = "Remove all bookmarked items",
+                    icon = Icons.Default.DeleteSweep,
+                    onClick = { viewModel.clearBookmarks() }
+                )
+                SettingRow(
+                    title = "Clear extensions cache",
+                    subtitle = "Force providers to re-pull data on next refresh",
+                    icon = Icons.Default.CleaningServices,
+                    onClick = { viewModel.clearExtensionCache() }
+                )
+            }
+
+            // About
+            SettingsGroup(title = "About", icon = Icons.Default.Info) {
+                Text("v0.3.0 · Built with Compose + libmpv + OkHttp",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+            }
+            Spacer(Modifier.height(24.dp))
         }
     }
+}
 
-    if (confirmClearHistory) {
-        AlertDialog(
-            onDismissRequest = { confirmClearHistory = false },
-            title = { Text("Clear watch history?", fontWeight = FontWeight.Bold) },
-            text = {
-                Text("This will erase ${history.size} watch-history entries and reset all resume positions.")
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.clearHistory()
-                    confirmClearHistory = false
-                }) { Text("Clear", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmClearHistory = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    if (showAbout) {
-        AlertDialog(
-            onDismissRequest = { showAbout = false },
-            title = { Text("About StormStream", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "StormStream v0.2.0",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text("A clean-room universal streaming app for Android.",
-                        style = MaterialTheme.typography.bodySmall)
-                    Spacer(Modifier.height(4.dp))
-                    val prows = listOf(
-                        "Stremio addons" to "✅ Working",
-                        "Universal HTML/JSON scrapers" to "✅ Working",
-                        "IPTV / M3U playlists" to "✅ Working",
-                        "CloudStream / Vega / QuickJS" to "🔌 Phase 3",
-                        "SkyStream / Sora / Aniyomi" to "🔌 Phase 3",
-                        "Native .storm extensions" to "🔌 Phase 3",
-                    )
-                    prows.forEach { (name, status) ->
-                        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(name, style = MaterialTheme.typography.bodySmall)
-                            Text(
-                                status,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (status.startsWith("✅"))
-                                    MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showAbout = false }) { Text("Close") }
-            }
-        )
+@Composable
+private fun SettingsGroup(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        ) {
+            Column(Modifier.padding(vertical = 6.dp), content = content)
+        }
     }
 }
 
 @Composable
 private fun SettingSwitch(
     title: String,
-    subtitle: String,
+    subtitle: String?,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     checked: Boolean,
-    onChecked: (Boolean) -> Unit,
-    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    onChecked: (Boolean) -> Unit
 ) {
     Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable { onChecked(!checked) }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        if (icon != null) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(16.dp))
-        }
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Switch(checked = checked, onCheckedChange = onChecked)
     }
 }
 
 @Composable
-private fun SettingAction(
+private fun SettingRow(
     title: String,
-    subtitle: String,
+    subtitle: String?,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
+    onClick: () -> Unit
 ) {
     Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.width(16.dp))
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
+        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

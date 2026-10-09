@@ -31,6 +31,9 @@ interface StreamProvider {
     /** Free native/JS resources. */
     suspend fun shutdown() {}
 
+    /** Drop any in-memory catalog/search caches so the next fetch is fresh. */
+    fun invalidateCache() {}
+
     // ---------- Capabilities ----------
 
     /** True if this provider has no catalogs and only answers search queries. */

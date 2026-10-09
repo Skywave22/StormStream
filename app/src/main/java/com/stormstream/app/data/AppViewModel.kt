@@ -9,6 +9,8 @@ import com.stormstream.app.providers.plugin.PluginRepoManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -103,11 +105,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch { store.adultContent.collect { _adultEnabled.value = it } }
         viewModelScope.launch { store.incognito.collect { _incognitoEnabled.value = it } }
-        viewModelScope.launch {
+        viewModelScope.launch { store.playerEngine.collect { _playerEngineType.value = it } }
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             _homeLoading.value = true
             providerManager.initializeOnStart()
-            refreshHome()
-            _homeLoading.value = false
+            withContext(kotlinx.coroutines.Dispatchers.Main) {
+                refreshHome()
+                _homeLoading.value = false
+            }
         }
     }
 
@@ -237,41 +242,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- Install actions ----------
 
     fun installStremio(url: String, onDone: (Boolean) -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val r = providerManager.installStremioAddon(url)
-            when (r) {
-                is StormResult.Ok -> { _errors.tryEmit("Stremio addon installed"); onDone(true) }
-                is StormResult.Err -> {
-                    _errors.tryEmit("Install failed: ${r.error.message}"); onDone(false)
+            withContext(kotlinx.coroutines.Dispatchers.Main) {
+                when (r) {
+                    is StormResult.Ok -> {
+                        _errors.tryEmit("Stremio addon installed"); onDone(true)
+                    }
+                    is StormResult.Err -> {
+                        _errors.tryEmit("Install failed: ${r.error.message}"); onDone(false)
+                    }
                 }
+                refreshHome()
             }
-            refreshHome()
         }
     }
 
     fun installScraper(json: String, onDone: (Boolean) -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val r = providerManager.installUniversalScraper(json)
-            when (r) {
-                is StormResult.Ok -> { _errors.tryEmit("Scraper installed"); onDone(true) }
-                is StormResult.Err -> {
-                    _errors.tryEmit("Install failed: ${r.error.message}"); onDone(false)
+            withContext(kotlinx.coroutines.Dispatchers.Main) {
+                when (r) {
+                    is StormResult.Ok -> { _errors.tryEmit("Scraper installed"); onDone(true) }
+                    is StormResult.Err -> {
+                        _errors.tryEmit("Install failed: ${r.error.message}"); onDone(false)
+                    }
                 }
+                refreshHome()
             }
-            refreshHome()
         }
     }
 
     fun installIptv(name: String, url: String, onDone: (Boolean) -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val r = providerManager.installIptvPlaylist(name, url)
-            when (r) {
-                is StormResult.Ok -> { _errors.tryEmit("Playlist added"); onDone(true) }
-                is StormResult.Err -> {
-                    _errors.tryEmit("Install failed: ${r.error.message}"); onDone(false)
+            withContext(kotlinx.coroutines.Dispatchers.Main) {
+                when (r) {
+                    is StormResult.Ok -> { _errors.tryEmit("Playlist added"); onDone(true) }
+                    is StormResult.Err -> {
+                        _errors.tryEmit("Install failed: ${r.error.message}"); onDone(false)
+                    }
                 }
+                refreshHome()
             }
-            refreshHome()
         }
     }
 
@@ -287,26 +300,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun addRepo(url: String, onDone: (Boolean) -> Unit = {}) {
-        viewModelScope.launch {
-            runCatching { repoManager.addRepo(url) }
-                .onSuccess {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val result = runCatching { repoManager.addRepo(url) }
+            withContext(kotlinx.coroutines.Dispatchers.Main) {
+                result.onSuccess {
                     _repos.value = repoManager.repos()
                     _errors.tryEmit("Repo added: ${it.name}")
                     onDone(true)
-                }
-                .onFailure {
+                }.onFailure {
                     _errors.tryEmit("Add repo failed: ${it.message}")
                     onDone(false)
                 }
+            }
         }
     }
 
     fun installPlugin(plugin: RepoPlugin) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val ok = repoManager.installPlugin(plugin)
-            if (ok) _errors.tryEmit("Installed ${plugin.name}")
-            else _errors.tryEmit("Failed to install ${plugin.name}")
-            refreshHome()
+            withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (ok) _errors.tryEmit("Installed ${plugin.name}")
+                else _errors.tryEmit("Failed to install ${plugin.name}")
+                refreshHome()
+            }
         }
     }
 
@@ -316,6 +332,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setIncognito(enabled: Boolean) {
         viewModelScope.launch { store.setIncognito(enabled) }
+    }
+
+    private val _playerEngineType = MutableStateFlow("mpv")
+    val playerEngineType: StateFlow<String> = _playerEngineType.asStateFlow()
+
+    fun setPlayerEngine(type: String) {
+        viewModelScope.launch { store.setPlayerEngine(type) }
     }
 
     /** Record/update a watch-history entry (no-op when incognito). */
@@ -363,6 +386,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearHistory() {
         viewModelScope.launch { store.clearHistory() }
+    }
+
+    fun clearBookmarks() {
+        viewModelScope.launch { store.clearBookmarks() }
+    }
+
+    fun clearExtensionCache() {
+        viewModelScope.launch(Dispatchers.IO) {
+            providerManager.providers.value.forEach { p -> p.invalidateCache() }
+            withContext(Dispatchers.Main) { refreshHome() }
+        }
+    }
+
+    fun removeHistory(key: String) {
+        viewModelScope.launch { store.removeFromHistory(key) }
     }
 
     // ---------- helpers ----------

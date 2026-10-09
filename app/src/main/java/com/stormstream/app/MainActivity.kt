@@ -4,24 +4,29 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.stormstream.app.data.AppViewModel
+import com.stormstream.app.data.CatalogRef
 import com.stormstream.app.data.Episode
 import com.stormstream.app.data.MediaItem
 import com.stormstream.app.ui.navigation.StormScreen
@@ -50,30 +55,21 @@ private fun StormAppRoot() {
     val tabs = listOf(
         BottomTab(StormScreen.Home, Icons.Default.Home, "Home"),
         BottomTab(StormScreen.Search, Icons.Default.Search, "Search"),
-        BottomTab(StormScreen.Extensions, Icons.Default.Extension, "Extensions"),
+        BottomTab(StormScreen.Extensions, Icons.Default.Extension, "Ext"),
         BottomTab(StormScreen.Settings, Icons.Default.Settings, "Settings"),
     )
     val viewModel: AppViewModel = viewModel()
     val snackbarHost = remember { SnackbarHostState() }
 
-    // Collect one-shot error events and show a snackbar.
     LaunchedEffect(Unit) {
         viewModel.errors.collectLatest { msg ->
-            snackbarHost.showSnackbar(
-                message = msg,
-                duration = SnackbarDuration.Short,
-            )
+            snackbarHost.showSnackbar(message = msg, duration = SnackbarDuration.Short)
         }
     }
 
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showBottomBar = currentRoute in listOf(
-        StormScreen.Home.route,
-        StormScreen.Search.route,
-        StormScreen.Extensions.route,
-        StormScreen.Settings.route,
-    )
+    val isPlayer = currentRoute == StormScreen.Player.route
 
     val onItemClick: (MediaItem) -> Unit = { item ->
         viewModel.openItem(item)
@@ -87,16 +83,104 @@ private fun StormAppRoot() {
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHost) },
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            if (showBottomBar) {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    tabs.forEach { tab ->
-                        val selected = backStackEntry?.destination?.hierarchy?.any {
-                            it.route == tab.screen.route
-                        } == true
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = {
+            if (!isPlayer) {
+                GlassBottomBar(navController, tabs, backStackEntry)
+            }
+        }
+    ) { innerPadding ->
+        Box(Modifier.padding(innerPadding)) {
+            NavHost(
+                navController = navController,
+                startDestination = StormScreen.Home.route,
+            ) {
+                composable(StormScreen.Home.route) {
+                    HomeScreen(
+                        onOpenItem = onItemClick,
+                        onSearch = { navController.navigate(StormScreen.Search.route) },
+                        onExtensions = { navController.navigate(StormScreen.Extensions.route) },
+                        onSettings = { navController.navigate(StormScreen.Settings.route) },
+                        onMore = { _ -> },
+                        viewModel = viewModel
+                    )
+                }
+                composable(StormScreen.Search.route) {
+                    SearchScreen(onItemClick = onItemClick, viewModel = viewModel)
+                }
+                composable(StormScreen.Extensions.route) {
+                    ExtensionsScreen(
+                        onBack = { navController.popBackStack() },
+                        viewModel = viewModel
+                    )
+                }
+                composable(StormScreen.Settings.route) {
+                    SettingsScreen(
+                        onBack = { navController.popBackStack() },
+                        viewModel = viewModel
+                    )
+                }
+                composable(StormScreen.Detail.route) {
+                    DetailScreen(
+                        onPlay = onPlay,
+                        onBack = { navController.popBackStack() },
+                        viewModel = viewModel
+                    )
+                }
+                composable(StormScreen.Player.route) {
+                    PlayerScreen(
+                        onBack = {
+                            viewModel.clearPlayback()
+                            navController.popBackStack()
+                        },
+                        viewModel = viewModel
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlassBottomBar(
+    navController: NavHostController,
+    tabs: List<BottomTab>,
+    backStackEntry: androidx.navigation.NavBackStackEntry?,
+) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.Transparent, MaterialTheme.colorScheme.background)
+                )
+            )
+            .navigationBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 10.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            tonalElevation = 10.dp,
+            shadowElevation = 16.dp,
+            modifier = Modifier.fillMaxWidth().height(64.dp)
+        ) {
+            Row(
+                Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                tabs.forEach { tab ->
+                    val selected = backStackEntry?.destination?.hierarchy?.any {
+                        it.route == tab.screen.route
+                    } == true
+                    val color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (selected) color.copy(alpha = 0.16f) else Color.Transparent)
+                            .clickableNoIndication {
                                 navController.navigate(tab.screen.route) {
                                     popUpTo(navController.graph.findStartDestination().id) {
                                         saveState = true
@@ -104,48 +188,36 @@ private fun StormAppRoot() {
                                     launchSingleTop = true
                                     restoreState = true
                                 }
-                            },
-                            icon = { Icon(tab.icon, contentDescription = tab.label) },
-                            label = { Text(tab.label) }
-                        )
+                            }
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        androidx.compose.foundation.layout.Column(
+                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                        ) {
+                            androidx.compose.material3.Icon(
+                                tab.icon, contentDescription = tab.label,
+                                tint = color, modifier = Modifier.size(22.dp)
+                            )
+                            Text(
+                                tab.label,
+                                color = color,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold
+                                else androidx.compose.ui.text.font.FontWeight.Normal
+                            )
+                        }
                     }
                 }
             }
         }
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = StormScreen.Home.route,
-            modifier = Modifier.padding(innerPadding),
-        ) {
-            composable(StormScreen.Home.route) {
-                HomeScreen(viewModel = viewModel, onItemClick = onItemClick)
-            }
-            composable(StormScreen.Search.route) {
-                SearchScreen(viewModel = viewModel, onItemClick = onItemClick)
-            }
-            composable(StormScreen.Extensions.route) {
-                ExtensionsScreen(viewModel = viewModel)
-            }
-            composable(StormScreen.Settings.route) {
-                SettingsScreen(viewModel = viewModel)
-            }
-            composable(StormScreen.Detail.route) {
-                DetailScreen(
-                    viewModel = viewModel,
-                    onPlay = onPlay,
-                    onBack = { navController.popBackStack() }
-                )
-            }
-            composable(StormScreen.Player.route) {
-                PlayerScreen(
-                    viewModel = viewModel,
-                    onBack = {
-                        viewModel.clearPlayback()
-                        navController.popBackStack()
-                    }
-                )
-            }
-        }
     }
 }
+
+private fun Modifier.clickableNoIndication(onClick: () -> Unit) =
+    this.then(
+        androidx.compose.foundation.clickable(
+            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+            indication = null,
+            onClick = onClick
+        )
+    )

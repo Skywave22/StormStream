@@ -15,8 +15,11 @@ android {
         applicationId = "com.stormstream.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -58,6 +61,9 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            jniLibs {
+                useLegacyPackaging = true
+            }
         }
     }
 }
@@ -78,7 +84,7 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
 
-    // Data persistence
+    // Data
     implementation(libs.androidx.datastore.preferences)
 
     // Networking
@@ -91,13 +97,14 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 
-    // Media / Player
+    // Media3 (ExoPlayer fallback, MediaSession, DataSources)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
     implementation(libs.media3.common)
     implementation(libs.media3.dash)
     implementation(libs.media3.hls)
     implementation(libs.media3.session)
+    implementation(libs.media3.datasource)
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
