@@ -98,7 +98,7 @@ dependencies {
 
     // Real libmpv player (mpv + FFmpeg + libass + dav1d prebuilt for all 4 ABIs;
     // includes native libs and a Compose MpvSurface/MpvPlayer).
-    implementation("io.github.yuroyami:libmpvkt-compose:0.3.0")
+    implementation("io.github.yuroyami:libmpvkt-compose:0.2.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
