@@ -41,30 +41,31 @@ jobs:
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
 
-      - name: Setup Gradle
+      - name: Setup Gradle (auto-installs wrapper if missing)
         uses: gradle/actions/setup-gradle@v4
         with:
           add-job-summary: on-failure
           gradle-version: "8.9"
+          generate-job-summary: true
 
-      - name: Create stub Gradle wrapper (so Gradle finds settings.gradle.kts)
+      - name: Generate Gradle wrapper
         run: |
           set -e
-          # Create a minimal settings-driven build using the installed gradle.
-          # Ensure gradle can be invoked from the repo root.
-          ls -la
-          cat settings.gradle.kts
+          # The setup-gradle action puts a `gradle` command on PATH. Use it to
+          # generate gradlew + gradle-wrapper.jar so subsequent steps use the
+          # standard wrapper flow.
+          gradle wrapper --gradle-version 8.9 --distribution-type bin
+          chmod +x gradlew
+          ls -la gradle/wrapper/
+          ./gradlew --version
 
       - name: Build debug APK
         run: |
-          set +e
-          gradle assembleDebug --stacktrace --no-daemon --console=plain 2>&1 | tee /tmp/build.log
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace --no-daemon --console=plain 2>&1 | tee /tmp/build.log
           echo "BUILD_EXIT=${PIPESTATUS[0]}"
-          # Show the tail containing the first error
-          echo "=========== BUILD LOG (tail) ==========="
-          grep -nE "^e: |^\* What went wrong|^> |error:|FAILED" /tmp/build.log | head -40
-          echo "========================================="
-          tail -150 /tmp/build.log
+          grep -nE "^e: |^\* What went wrong|FAILURE:|BUILD FAILED" /tmp/build.log | head -40 || true
+          tail -200 /tmp/build.log
           exit ${PIPESTATUS[0]}
 
       - name: Upload debug APK
@@ -78,7 +79,7 @@ jobs:
 
       - name: Build release APK (unsigned)
         if: always()
-        run: gradle assembleRelease --stacktrace --no-daemon --console=plain || true
+        run: ./gradlew assembleRelease --stacktrace --no-daemon --console=plain || true
 
       - name: Upload release APK (unsigned)
         if: always()
