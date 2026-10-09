@@ -81,5 +81,5 @@ dependencies {
     implementation(libs.media3.hls)
     implementation(libs.media3.session)
 
-    debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation("androidx.compose.ui:ui-tooling")
 }
