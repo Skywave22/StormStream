@@ -40,6 +40,7 @@ jobs:
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+          sdkmanager --list_installed | head
 
       - name: Provision Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
@@ -47,21 +48,16 @@ jobs:
           add-job-summary: on-failure
           gradle-version: "8.9"
 
-      - name: Generate Gradle wrapper files
-        run: |
-          set -ex
-          which gradle
-          gradle --version
-          gradle wrapper --gradle-version 8.9 --distribution-type bin
-          chmod +x gradlew
-          ls -la gradle/wrapper/
-
-      - name: Build debug APK
+      - name: Build debug APK (directly via gradle, no wrapper needed)
         run: |
           set -o pipefail
-          ./gradlew assembleDebug --stacktrace --no-daemon --console=plain 2>&1 | tee /tmp/build.log
+          echo "--- gradle location ---"
+          which gradle || find / -name 'gradle' -type f 2>/dev/null | head -5
+          gradle --version
+          gradle assembleDebug --stacktrace --no-daemon --console=plain 2>&1 | tee /tmp/build.log
           EXIT=${PIPESTATUS[0]}
-          grep -nE "^e: |^\* What went wrong|FAILURE:|BUILD FAILED|Could not|error: " /tmp/build.log | head -60 || true
+          echo "----- DIAGNOSTIC -----"; 
+          grep -nE "^e: |^\* What went wrong|FAILURE:|BUILD FAILED|Could not|error: |Exception|Caused by" /tmp/build.log | head -80 || true
           echo "----- LAST 200 LINES -----"
           tail -200 /tmp/build.log
           exit $EXIT
@@ -77,7 +73,7 @@ jobs:
 
       - name: Build release APK (unsigned)
         if: always()
-        run: ./gradlew assembleRelease --stacktrace --no-daemon --console=plain || true
+        run: gradle assembleRelease --stacktrace --no-daemon --console=plain || true
 
       - name: Upload release APK (unsigned)
         if: always()
