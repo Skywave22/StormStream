@@ -95,15 +95,17 @@ jobs:
       - name: Build release APK (unsigned)
         if: always()
         run: |
-          gradle assembleRelease --stacktrace --no-daemon --console=plain > /tmp/build-release.log 2>&1 || true
-          tail -100 /tmp/build-release.log
+          gradle assembleRelease --stacktrace --no-daemon --console=plain > build-release.log 2>&1 || true
+          tail -100 build-release.log
 
       - name: Upload build log (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: /tmp/build-*.log
+          path: |
+            build-debug.log
+            build-release.log
           if-no-files-found: ignore
           retention-days: 14
 
