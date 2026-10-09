@@ -47,11 +47,28 @@ jobs:
           add-job-summary: on-failure
           gradle-version: "8.9"
 
+      - name: Create stub Gradle wrapper (so Gradle finds settings.gradle.kts)
+        run: |
+          set -e
+          # Create a minimal settings-driven build using the installed gradle.
+          # Ensure gradle can be invoked from the repo root.
+          ls -la
+          cat settings.gradle.kts
+
       - name: Build debug APK
-        working-directory: .
-        run: gradle assembleDebug --stacktrace --no-daemon
+        run: |
+          set +e
+          gradle assembleDebug --stacktrace --no-daemon --console=plain 2>&1 | tee /tmp/build.log
+          echo "BUILD_EXIT=${PIPESTATUS[0]}"
+          # Show the tail containing the first error
+          echo "=========== BUILD LOG (tail) ==========="
+          grep -nE "^e: |^\* What went wrong|^> |error:|FAILED" /tmp/build.log | head -40
+          echo "========================================="
+          tail -150 /tmp/build.log
+          exit ${PIPESTATUS[0]}
 
       - name: Upload debug APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: stormstream-debug-apk
@@ -60,7 +77,8 @@ jobs:
           retention-days: 30
 
       - name: Build release APK (unsigned)
-        run: gradle assembleRelease --stacktrace --no-daemon || true
+        if: always()
+        run: gradle assembleRelease --stacktrace --no-daemon --console=plain || true
 
       - name: Upload release APK (unsigned)
         if: always()
