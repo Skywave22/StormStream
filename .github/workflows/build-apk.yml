@@ -51,14 +51,43 @@ jobs:
           gradle-version: "8.7"
 
       - name: Build debug APK
+        id: build_debug
+        continue-on-error: true
         run: |
-          gradle assembleDebug --no-daemon --stacktrace --info 2>&1 | tee build.log
-          # Print the Kotlin error lines in a block that GitHub will highlight.
-          echo "======= KOTLIN COMPILER OUTPUT ======="
-          awk '/^e: /{p=1} p{print} /^e: /{c++} c>200{exit}' build.log || true
-          echo "======= END ======="
-          # Fail the step if the log contains BUILD FAILED
-          ! grep -q "BUILD FAILED" build.log
+          set +e
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace --info --console=plain 2>&1 | tee build.log
+          build_status=${PIPESTATUS[0]}
+          echo "exit_code=$build_status" >> "$GITHUB_OUTPUT"
+          echo "Gradle assembleDebug exit code: $build_status"
+          exit 0
+
+      - name: Report build diagnostics
+        if: always()
+        run: |
+          {
+            echo "## Debug APK build diagnostics"
+            echo
+            echo '```text'
+            if [ -f build.log ]; then
+              grep -nE '^e: |^w: |^FAILURE:|^\* What went wrong|^> Task .* FAILED|BUILD FAILED|Caused by:' build.log | head -100 || echo "No compiler or Gradle diagnostics captured."
+            else
+              echo "Build log was not created."
+            fi
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -f build.log ]; then
+            grep -E '^e: |^FAILURE:|^\* What went wrong|^> Task .* FAILED|BUILD FAILED|Caused by:' build.log | head -60 | while IFS= read -r diagnostic; do
+              escaped=${diagnostic//'%'/'%25'}
+              escaped=${escaped//$'\r'/'%0D'}
+              escaped=${escaped//$'\n'/'%0A'}
+              echo "::error title=Build diagnostic::$escaped"
+            done
+          fi
+
+      - name: Fail when debug build fails
+        if: steps.build_debug.outcome == 'failure'
+        run: exit 1
 
       - name: Build release APK (unsigned)
         run: gradle assembleRelease --no-daemon || true
