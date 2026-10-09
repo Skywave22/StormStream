@@ -90,11 +90,11 @@ class UniversalScraperProvider(
         val doc = fetchDoc(url)
         val items = doc.select(e.rowSelector)
         var n = 0
-        return items.map { el ->
+        return items.mapNotNull { el ->
             n++
             val epNum = selectText(el, e.number)?.toIntOrNull() ?: n
             val season = selectText(el, e.season)?.toIntOrNull() ?: 1
-            val link = selectAttr(el, e.link, "href") ?: return@map null
+            val link = selectAttr(el, e.link, "href") ?: return@mapNotNull null
             val title = selectText(el, e.title) ?: "Episode $epNum"
             Episode(
                 id = "$url#ep$season-$epNum",
@@ -176,7 +176,7 @@ class UniversalScraperProvider(
             MediaItem(
                 id = "$url#${link.hashCode()}",
                 providerId = config.id,
-                title = clean(title),
+                title = clean(title) ?: title,
                 type = defaultType,
                 posterUrl = poster?.let { http.resolve(url, it) },
                 internalUrl = link,
@@ -211,7 +211,7 @@ class UniversalScraperProvider(
                 type = defaultType,
                 posterUrl = poster,
                 internalUrl = link,
-                year = sel.year.jsonKey?.let { obj[it]?.jsonPrimitive?.content?.take(4)?.toIntOrNull() },
+                year = sel.year?.jsonKey?.let { obj[it]?.jsonPrimitive?.content?.take(4)?.toIntOrNull() },
             )
         }
     }
