@@ -61,6 +61,9 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
           ls "$ANDROID_SDK_ROOT/platforms"
           ls "$ANDROID_SDK_ROOT/build-tools"
+          # Write local.properties so AGP can find the SDK even without env vars.
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+          cat local.properties
 
       - name: Build debug APK
         id: build_debug
