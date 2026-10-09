@@ -220,8 +220,17 @@ class UniversalScraperProvider(
     }.onFailure { Log.w(TAG, "fetch fail $url", it) }.getOrNull()
 
     private fun scrapeJsonList(url: String, sel: ItemSelectors, defaultType: MediaType): List<MediaItem> {
-        val result = http.get(url, timeoutMs = 10_000L)
-        val body = (result as? StormHttpClient.StormHttpResult.Ok)?.body ?: return emptyList()
+        // Synchronous fetch via OkHttp (called from suspend context but keeps
+        // this function non-suspend for simpler .map{} call sites).
+        val body = runCatching {
+            val req = Request.Builder().url(url)
+                .header("User-Agent", StormHttpClient.USER_AGENT)
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .build()
+            http.client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) null else resp.body?.string()
+            }
+        }.getOrNull() ?: return emptyList()
         val arr = runCatching {
             val el = StormJson.parseToJsonElement(body)
             when {

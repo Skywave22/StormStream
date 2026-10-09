@@ -52,7 +52,7 @@ class PlaybackService : MediaSessionService() {
                     .build(),
                 /* handleAudioFocus = */ true
             )
-            .setHandleWakeLock(true)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
 
         player = newPlayer

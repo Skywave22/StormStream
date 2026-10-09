@@ -36,7 +36,7 @@ sealed class StormResult<out T> {
 
     companion object {
         fun <T> ok(value: T): StormResult<T> = Ok(value)
-        fun err(message: String, cause: Throwable? = null): StormResult<T> =
+        fun <T> err(message: String, cause: Throwable? = null): StormResult<T> =
             Err(StormError.Generic(message, cause))
     }
 }

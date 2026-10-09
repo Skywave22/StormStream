@@ -228,7 +228,7 @@ class StremioAddonProvider(
 
     companion object {
         private const val TAG = "StormStremio"
-        fun fromUrl(http: StormHttpClient, url: String): StremioAddonProvider {
+        suspend fun fromUrl(http: StormHttpClient, url: String): StremioAddonProvider {
             val body = when (val r = http.get(url, timeoutMs = 10_000L)) {
                 is StormHttpClient.StormHttpResult.Ok -> r.body
                 is StormHttpClient.StormHttpResult.Err ->
