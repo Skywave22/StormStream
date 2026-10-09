@@ -10,6 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.stormstream.app.data.HistoryEntry
 import com.stormstream.app.data.MediaItem
 import com.stormstream.app.data.MediaType
 
@@ -20,7 +21,9 @@ fun ContentRow(
     items: List<MediaItem>,
     onItemClick: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
+    progressMap: Map<String, Float> = emptyMap(),
 ) {
+    if (items.isEmpty()) return
     Column(modifier = modifier.padding(vertical = 8.dp)) {
         Row(
             modifier = Modifier
@@ -46,7 +49,6 @@ fun ContentRow(
             }
         }
         if (items.any { it.type == MediaType.IPTV }) {
-            // IPTV channels render as horizontal cards
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -65,8 +67,45 @@ fun ContentRow(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(items, key = { it.id + "@" + it.providerId }) { item ->
-                    PosterCard(item = item, onClick = { onItemClick(item) })
+                    val key = "${item.providerId}:${item.id}"
+                    PosterCard(
+                        item = item,
+                        onClick = { onItemClick(item) },
+                        progress = progressMap[key]
+                    )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun ContinueWatchingRow(
+    title: String,
+    items: List<HistoryEntry>,
+    onItemClick: (HistoryEntry) -> Unit,
+    onRemove: (HistoryEntry) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (items.isEmpty()) return
+    Column(modifier = modifier.padding(vertical = 8.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            items(items, key = { it.key }) { entry ->
+                ContinueWatchingCard(
+                    entry = entry,
+                    onClick = { onItemClick(entry) },
+                    onRemove = { onRemove(entry) }
+                )
             }
         }
     }

@@ -164,3 +164,32 @@ data class PlaybackTarget(
     val selectedStream: StreamSource?
         get() = streams.getOrNull(selectedIndex)
 }
+
+/**
+ * A single watch-history record. Stored in DataStore as a JSON list.
+ *
+ * [positionMs] is the last playback position so we can resume. [updatedAt]
+ * lets us order the "Continue watching" row newest-first.
+ */
+@Serializable
+data class HistoryEntry(
+    /** Stable key: providerId + itemId for movies, +episode id for series. */
+    val key: String,
+    val item: MediaItem,
+    val episode: Episode?,
+    val lastStreamUrl: String? = null,
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+    val updatedAt: Long = System.currentTimeMillis(),
+) {
+    val progress: Float get() = if (durationMs > 0L) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    val completed: Boolean get() = durationMs > 0L && positionMs >= durationMs - 30_000L
+}
+
+/** A bookmarked ("Watch later") item. */
+@Serializable
+data class BookmarkEntry(
+    val key: String,
+    val item: MediaItem,
+    val addedAt: Long = System.currentTimeMillis(),
+)

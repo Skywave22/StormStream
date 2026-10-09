@@ -14,12 +14,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
 
 /**
- * Persistent storage for user settings and the list of installed extensions.
+ * Persistent storage for user settings, installed extensions, watch history,
+ * and bookmarks.
  *
- * Phase 1: DataStore-backed. Provider configs are serialized as a JSON list
- * under a single preference key so we can restore the full provider registry on
- * cold start without Room. Watch history, bookmarks, etc. move to Room in
- * Phase 2.
+ * DataStore-backed; watch history and bookmarks are small JSON lists so we
+ * avoid a Room dependency in Phase 2.
  */
 class StormStore(private val context: Context) {
 
@@ -27,12 +26,18 @@ class StormStore(private val context: Context) {
         private val Context.dataStore: DataStore<Preferences>
                 by preferencesDataStore(name = "stormstream")
 
-        // Keys
         private val KEY_ADULT = booleanPreferencesKey("adult_content")
         private val KEY_INCOGNITO = booleanPreferencesKey("incognito")
         private val KEY_EXTENSIONS = stringPreferencesKey("extensions_json")
         private val KEY_BOOTSTRAPPED = booleanPreferencesKey("bootstrapped_v1")
-        private val KEY_PLAYER_MPV_HINT = booleanPreferencesKey("prefer_external")
+        private val KEY_HISTORY = stringPreferencesKey("history_json")
+        private val KEY_BOOKMARKS = stringPreferencesKey("bookmarks_json")
+        private const val MAX_HISTORY = 60
+        private const val MAX_BOOKMARKS = 100
+
+        fun historyKey(item: MediaItem, episode: Episode?): String =
+            if (episode != null) "${item.providerId}:${item.id}:${episode.id}"
+            else "${item.providerId}:${item.id}"
     }
 
     // --- settings ---
@@ -53,7 +58,7 @@ class StormStore(private val context: Context) {
         context.dataStore.edit { it[KEY_INCOGNITO] = enabled }
     }
 
-    // --- bootstrap flag (we only seed default sources once) ---
+    // --- bootstrap flag ---
 
     suspend fun isBootstrapped(): Boolean =
         context.dataStore.data.first()[KEY_BOOTSTRAPPED] == true
@@ -84,4 +89,81 @@ class StormStore(private val context: Context) {
 
     suspend fun loadExtensionsOnce(): List<InstalledExtension> =
         extensionsFlow.first()
+
+    // --- watch history ---
+
+    val historyFlow: Flow<List<HistoryEntry>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_HISTORY] ?: return@map emptyList()
+        runCatching {
+            StormJson.decodeFromString(ListSerializer(HistoryEntry.serializer()), json)
+                .sortedByDescending { it.updatedAt }
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun updateHistory(entry: HistoryEntry, incognito: Boolean) {
+        if (incognito) return
+        val current = historyFlow.first().toMutableList()
+        current.removeAll { it.key == entry.key }
+        current.add(0, entry)
+        val trimmed = current.take(MAX_HISTORY)
+        val json = StormJson.encodeToString(
+            ListSerializer(HistoryEntry.serializer()), trimmed
+        )
+        context.dataStore.edit { it[KEY_HISTORY] = json }
+    }
+
+    suspend fun removeFromHistory(key: String) {
+        val current = historyFlow.first().toMutableList()
+        current.removeAll { it.key == key }
+        val json = StormJson.encodeToString(
+            ListSerializer(HistoryEntry.serializer()), current
+        )
+        context.dataStore.edit { it[KEY_HISTORY] = json }
+    }
+
+    suspend fun clearHistory() {
+        context.dataStore.edit { it.remove(KEY_HISTORY) }
+    }
+
+    // --- bookmarks ---
+
+    val bookmarksFlow: Flow<List<BookmarkEntry>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_BOOKMARKS] ?: return@map emptyList()
+        runCatching {
+            StormJson.decodeFromString(ListSerializer(BookmarkEntry.serializer()), json)
+                .sortedByDescending { it.addedAt }
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun toggleBookmark(item: MediaItem): Boolean {
+        val key = historyKey(item, null)
+        val current = bookmarksFlow.first().toMutableList()
+        return if (current.any { it.key == key }) {
+            current.removeAll { it.key == key }
+            persistBookmarks(current)
+            false
+        } else {
+            current.add(0, BookmarkEntry(key = key, item = item))
+            persistBookmarks(current.take(MAX_BOOKMARKS))
+            true
+        }
+    }
+
+    suspend fun isBookmarked(item: MediaItem): Boolean {
+        val key = historyKey(item, null)
+        return bookmarksFlow.first().any { it.key == key }
+    }
+
+    suspend fun removeBookmark(key: String) {
+        val current = bookmarksFlow.first().toMutableList()
+        current.removeAll { it.key == key }
+        persistBookmarks(current)
+    }
+
+    private suspend fun persistBookmarks(list: List<BookmarkEntry>) {
+        val json = StormJson.encodeToString(
+            ListSerializer(BookmarkEntry.serializer()), list
+        )
+        context.dataStore.edit { it[KEY_BOOKMARKS] = json }
+    }
 }

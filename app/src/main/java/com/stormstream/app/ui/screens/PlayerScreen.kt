@@ -16,6 +16,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.stormstream.app.data.StormStore
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -100,7 +103,8 @@ fun PlayerScreen(
         }
     }
 
-    // When the selected stream changes, load it.
+    // When the selected stream changes, load it. Seek to resume position if
+    // there's a history entry for this key.
     LaunchedEffect(selectedIndex) {
         val stream = streams.getOrNull(selectedIndex) ?: return@LaunchedEffect
         playerError = null
@@ -108,13 +112,51 @@ fun PlayerScreen(
         val source = PlaybackService.buildMediaSource(dataSourceFactory, stream)
         player.setMediaSource(source)
         player.prepare()
+        // Seek to resume position on first load if applicable.
+        val resumeKey = StormStore.historyKey(playback.item, playback.episode)
+        val resumeMs = viewModel.history.value.firstOrNull { it.key == resumeKey }
+            ?.takeIf { !it.completed }?.positionMs ?: 0L
+        if (resumeMs > 5_000L) {
+            player.seekTo(resumeMs)
+        }
         player.playWhenReady = true
     }
 
-    // Keep screen on while playing.
-    DisposableEffect(Unit) {
-        // We rely on the PlayerView's keepScreenOn flag below.
-        onDispose { }
+    // Periodically record progress for history/resume.
+    LaunchedEffect(playback, selectedIndex) {
+        val stream = streams.getOrNull(selectedIndex)
+        while (isActive) {
+            delay(5_000L)
+            val pos = player.currentPosition
+            val dur = player.duration.coerceAtLeast(0L)
+            if (pos > 2_000L) {
+                viewModel.recordProgress(
+                    item = playback.item,
+                    episode = playback.episode,
+                    streamUrl = stream?.url,
+                    positionMs = pos,
+                    durationMs = dur,
+                )
+            }
+        }
+    }
+
+    // Record final position and mark completion when leaving.
+    DisposableEffect(playback, selectedIndex) {
+        onDispose {
+            val stream = streams.getOrNull(selectedIndex)
+            val pos = player.currentPosition
+            val dur = player.duration.coerceAtLeast(0L)
+            if (pos > 2_000L) {
+                viewModel.recordProgress(
+                    item = playback.item,
+                    episode = playback.episode,
+                    streamUrl = stream?.url,
+                    positionMs = pos,
+                    durationMs = dur,
+                )
+            }
+        }
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {

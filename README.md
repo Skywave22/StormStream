@@ -50,6 +50,20 @@ with ~28 critical bugs). Phase 1 fixes include:
 - 🛑 **Parse caps** — IPTV parser is line-sequence and caps at 5000 channels /
   100 groups to protect against runaway public playlists.
 
+### Phase 2 polish
+- ⏯️ **Watch history with resume positions** — position saved every 5 seconds
+  and on exit; history is capped and persisted.
+- ▶️ **"Continue watching"** home row with progress bars; tapping resumes.
+- 🔖 **Bookmarks** on any item (bookmark icon in the detail screen).
+- 🎞️ **Auto-rotating hero carousel** of featured content.
+- 🔁 **Auto-resume** for movies/series with "Resume" label and percent; auto-
+  selects the next unfinished episode when you open a show.
+- 🕶️ **Incognito mode** — watch without writing history.
+- 🗑️ **Clear history** in Settings.
+- ⚙️ **Revamped settings** with cards, stats, About dialog.
+- 📺 **Player improvements** — buffering spinner, error overlay with retry,
+  seek-to-resume on stream load.
+
 ## Architecture
 
 100% Kotlin + Jetpack Compose with Material 3, dark-first navy/electric-blue
@@ -169,13 +183,14 @@ Hikari's codebase.
 
 ## Roadmap
 
-- **Phase 2 (next)** — Watch history + "Continue watching" (Room), home hero
-  carousel, loading skeletons, TMDB metadata enrichment, season jump
-  selector, PiP support, better search filters.
+- **Phase 2 (in progress / current)** — Watch history + continue watching +
+  bookmarks + hero + resume (✅ shipped); next: loading skeletons, TMDB
+  metadata enrichment, season jump selector, PiP, better search filters,
+  trakt-style lists.
 - **Phase 3** — Real plugin runtimes: CloudStream `.cs3` via dex classloader,
   Vega/Nuvio via QuickJS, native `.storm` extension API.
-- **Phase 4** — Downloads/offline, Trakt/MAL sync, bookmarks lists, crash
-  logs & diagnostics, backup/restore, Chromecast.
+- **Phase 4** — Downloads/offline, Trakt/MAL sync, crash logs & diagnostics,
+  backup/restore, Chromecast.
 
 ## License
 

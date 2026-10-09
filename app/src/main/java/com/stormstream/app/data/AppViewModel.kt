@@ -12,9 +12,12 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -82,8 +85,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _adultEnabled = MutableStateFlow(false)
     val adultEnabled: StateFlow<Boolean> = _adultEnabled.asStateFlow()
 
+    private val _incognitoEnabled = MutableStateFlow(false)
+    val incognitoEnabled: StateFlow<Boolean> = _incognitoEnabled.asStateFlow()
+
+    /** Watch history sorted newest-first. */
+    val history: StateFlow<List<HistoryEntry>> = store.historyFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** In-progress items (not completed) for the "Continue watching" row. */
+    val continueWatching: StateFlow<List<HistoryEntry>> = history.map { list ->
+        list.filter { !it.completed && it.positionMs > 5_000L }.take(12)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val bookmarks: StateFlow<List<BookmarkEntry>> = store.bookmarksFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     init {
         viewModelScope.launch { store.adultContent.collect { _adultEnabled.value = it } }
+        viewModelScope.launch { store.incognito.collect { _incognitoEnabled.value = it } }
         viewModelScope.launch {
             _homeLoading.value = true
             providerManager.initializeOnStart()
@@ -293,6 +312,57 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setAdultEnabled(enabled: Boolean) {
         viewModelScope.launch { store.setAdultContent(enabled) }
+    }
+
+    fun setIncognito(enabled: Boolean) {
+        viewModelScope.launch { store.setIncognito(enabled) }
+    }
+
+    /** Record/update a watch-history entry (no-op when incognito). */
+    fun recordProgress(
+        item: MediaItem,
+        episode: Episode?,
+        streamUrl: String?,
+        positionMs: Long,
+        durationMs: Long,
+    ) {
+        viewModelScope.launch {
+            store.updateHistory(
+                HistoryEntry(
+                    key = StormStore.historyKey(item, episode),
+                    item = item,
+                    episode = episode,
+                    lastStreamUrl = streamUrl,
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                ),
+                incognito = _incognitoEnabled.value
+            )
+        }
+    }
+
+    /** Mark a history entry as completed (watching finished). */
+    fun markCompleted(item: MediaItem, episode: Episode?) {
+        viewModelScope.launch {
+            val key = StormStore.historyKey(item, episode)
+            val current = history.value.firstOrNull { it.key == key } ?: return@launch
+            store.updateHistory(
+                current.copy(positionMs = current.durationMs, updatedAt = System.currentTimeMillis()),
+                incognito = _incognitoEnabled.value
+            )
+        }
+    }
+
+    fun toggleBookmark(item: MediaItem, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch { onResult(store.toggleBookmark(item)) }
+    }
+
+    fun removeFromHistory(key: String) {
+        viewModelScope.launch { store.removeFromHistory(key) }
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch { store.clearHistory() }
     }
 
     // ---------- helpers ----------

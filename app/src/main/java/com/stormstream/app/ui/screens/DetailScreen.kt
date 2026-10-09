@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -39,17 +41,12 @@ fun DetailScreen(
     val streams by viewModel.streams.collectAsState()
     val detailLoading by viewModel.detailLoading.collectAsState()
     val streamsLoading by viewModel.streamsLoading.collectAsState()
+    val bookmarks by viewModel.bookmarks.collectAsState()
+    val history by viewModel.history.collectAsState()
 
     var selectedEpisode by remember { mutableStateOf<Episode?>(null) }
     var selectedStreamIndex by remember { mutableStateOf(0) }
-
-    // When a new episode is selected, load its streams.
-    LaunchedEffect(selectedEpisode) {
-        val media = item ?: return@LaunchedEffect
-        if (selectedEpisode != null && streams.isEmpty()) {
-            viewModel.loadStreams(media, selectedEpisode)
-        }
-    }
+    var isBookmarkedState by remember { mutableStateOf(false) }
 
     if (item == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -59,6 +56,23 @@ fun DetailScreen(
     }
     val media = item!!
     val isSeries = episodes.isNotEmpty() && media.type in setOf(MediaType.SERIES, MediaType.ANIME)
+
+    // Update bookmark state when media changes
+    LaunchedEffect(media.id, bookmarks) {
+        isBookmarkedState = bookmarks.any { it.key == "${media.providerId}:${media.id}" }
+    }
+
+    // When a new episode is selected, load its streams.
+    LaunchedEffect(selectedEpisode) {
+        if (selectedEpisode != null && streams.isEmpty()) {
+            viewModel.loadStreams(media, selectedEpisode)
+        }
+    }
+
+    val resumeEntry = remember(media, selectedEpisode, history) {
+        val key = com.stormstream.app.data.StormStore.historyKey(media, selectedEpisode)
+        history.firstOrNull { it.key == key && !it.completed }
+    }
 
     // Group episodes by season for nicer UX if there are multiple seasons.
     val seasons = remember(episodes) {
@@ -117,6 +131,24 @@ fun DetailScreen(
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
+                        tint = Color.White
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        viewModel.toggleBookmark(media) { added ->
+                            isBookmarkedState = added
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(8.dp)
+                ) {
+                    Icon(
+                        if (isBookmarkedState) Icons.Default.Bookmark
+                        else Icons.Default.BookmarkBorder,
+                        contentDescription = "Bookmark",
                         tint = Color.White
                     )
                 }
@@ -206,7 +238,7 @@ fun DetailScreen(
                         loading = streamsLoading,
                     )
                 } else if (!isSeries) {
-                    // Movie
+                    val hasResume = resumeEntry != null
                     Button(
                         onClick = { onPlay(media, null, selectedStreamIndex) },
                         modifier = Modifier.fillMaxWidth(),
@@ -214,7 +246,22 @@ fun DetailScreen(
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text(if (streams.isNotEmpty()) "Play" else "Loading streams…")
+                        Text(
+                            when {
+                                streams.isEmpty() -> "Loading streams…"
+                                hasResume -> "Resume"
+                                else -> "Play"
+                            }
+                        )
+                    }
+                    if (hasResume) {
+                        Spacer(Modifier.height(4.dp))
+                        val pct = (resumeEntry!!.progress * 100).toInt()
+                        Text(
+                            "Resumes at $pct% — ${formatMs(resumeEntry.positionMs)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     Spacer(Modifier.height(8.dp))
                     StreamList(
@@ -223,6 +270,17 @@ fun DetailScreen(
                         onSelect = { selectedStreamIndex = it },
                         loading = streamsLoading,
                     )
+                } else {
+                    // Series: auto-select next up / resume episode
+                    LaunchedEffect(episodes) {
+                        if (selectedEpisode == null && episodes.isNotEmpty()) {
+                            val resume = history.firstOrNull { h ->
+                                h.item.providerId == media.providerId &&
+                                        h.item.id == media.id && !h.completed && h.episode != null
+                            }
+                            selectedEpisode = resume?.episode ?: episodes.first()
+                        }
+                    }
                 }
             }
         }
@@ -421,4 +479,11 @@ private fun StreamList(
     }
 }
 
+private fun formatMs(ms: Long): String {
+    val totalSec = ms / 1000
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
 
