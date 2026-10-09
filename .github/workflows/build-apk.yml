@@ -63,26 +63,34 @@ jobs:
           ls "$ANDROID_SDK_ROOT/build-tools"
 
       - name: Build debug APK
+        id: build_debug
+        continue-on-error: true
         run: |
           set -o pipefail
           gradle assembleDebug --stacktrace --no-daemon --console=plain 2>&1 | tee build-debug.log
-          EXIT=${PIPESTATUS[0]}
-          echo "----- KOTLIN ERRORS (raw) -----"
-          grep -nE "^e: file://|^e: " build-debug.log | head -80 || true
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          echo "----- KOTLIN ERRORS -----"
+          grep -nE "^e: (file://)?/github" build-debug.log | head -80 || true
           echo "----- WHAT WENT WRONG -----"
-          grep -nE "^\* What went wrong|^> |FAILURE:|BUILD FAILED|Could not |Caused by:|Exception" build-debug.log | head -40 || true
+          grep -nE "^\* What went wrong|^> |FAILURE:|BUILD FAILED|Caused by:" build-debug.log | head -40 || true
           echo "----- TAIL -----"
           tail -200 build-debug.log
-          exit $EXIT
+          exit 0
 
-      - name: Upload build log (always)
+      - name: Write errors to GITHUB_STEP_SUMMARY
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-debug-log
-          path: build-debug.log
-          if-no-files-found: ignore
-          retention-days: 14
+        run: |
+          {
+            echo "# Build Report"
+            echo
+            echo '```'
+            grep -nE "^e: |^\* What went wrong|FAILURE:|BUILD FAILED|Caused by:" build-debug.log | head -100 || echo "No errors captured."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail build on error
+        if: steps.build_debug.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Build release APK (unsigned)
         if: always()
