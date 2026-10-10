@@ -123,7 +123,7 @@ class JsProvider private constructor(
     // ---------- detail / playback ----------
 
     override suspend fun getMeta(item: MediaItem): MediaItem {
-        val args = buildJsonObject { put("item", item.toJsItem()) }.toString()
+        val args = buildJsonObject { put("item", StormJson.encodeToJsonElement(JsItem.serializer(), item.toJsItem())) }.toString()
         val json = runtimeOrThrow().invokeOrNull("getMeta", args)
             ?.takeUnless { it == "null" } ?: return item
         val enriched = StormJson.decodeFromString<JsItem>(json)
@@ -131,7 +131,7 @@ class JsProvider private constructor(
     }
 
     override suspend fun getEpisodes(item: MediaItem): List<Episode>? {
-        val args = buildJsonObject { put("item", item.toJsItem()) }.toString()
+        val args = buildJsonObject { put("item", StormJson.encodeToJsonElement(JsItem.serializer(), item.toJsItem())) }.toString()
         val json = runtimeOrThrow().invokeOrNull("getEpisodes", args) ?: return null
         if (json == "null") return null
         return StormJson.decodeFromString<List<JsEpisode>>(json).map { it.toEpisode(config.id, item.id) }
@@ -139,8 +139,10 @@ class JsProvider private constructor(
 
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> {
         val args = buildJsonObject {
-            put("item", item.toJsItem())
-            if (episode != null) put("episode", episode.toJsEpisode())
+            put("item", StormJson.encodeToJsonElement(JsItem.serializer(), item.toJsItem()))
+            if (episode != null) {
+                put("episode", StormJson.encodeToJsonElement(JsEpisode.serializer(), episode.toJsEpisode()))
+            }
         }.toString()
         val json = runtimeOrThrow().invoke("getStreams", args).takeUnless { it == "null" }
             ?: return emptyList()

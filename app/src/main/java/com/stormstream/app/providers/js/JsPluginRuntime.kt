@@ -144,7 +144,7 @@ class JsPluginRuntime(
 
     // ---------- native bridge ----------
 
-    private fun installBridge(qjs: QuickJs) {
+    private suspend fun installBridge(qjs: QuickJs) {
         qjs.evaluate<Unit>(
             "globalThis.__stormUserAgent = ${StormHttpClient.USER_AGENT.toJsStringLiteral()};",
             filename = "storm-bridge.js"
