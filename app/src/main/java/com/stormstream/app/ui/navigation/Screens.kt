@@ -13,6 +13,8 @@ sealed class StormScreen(val route: String) {
     data object Detail : StormScreen("detail")
     /** Player state lives in MpvPlayerController. */
     data object Player : StormScreen("player")
+    /** Rolling on-device log (shareable). */
+    data object Logs : StormScreen("logs")
     /** Full paged grid for one catalog. */
     data object Browse : StormScreen("browse/{providerId}/{catalogId}/{catalogName}") {
         fun create(providerId: String, catalogId: String, catalogName: String): String =

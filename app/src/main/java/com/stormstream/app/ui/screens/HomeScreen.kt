@@ -55,6 +55,9 @@ import com.stormstream.app.ui.components.ContentRow
 import com.stormstream.app.ui.components.EmptyState
 import com.stormstream.app.ui.components.ShimmerRow
 import com.stormstream.app.ui.components.TypeBadge
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material3.Surface
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,6 +69,7 @@ fun HomeScreen(
 ) {
     val rows by viewModel.homeRows.collectAsState()
     val refreshing by viewModel.homeRefreshing.collectAsState()
+    val continueWatching by viewModel.continueWatching.collectAsState()
 
     Scaffold(
         topBar = {
@@ -104,6 +108,50 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp),
             ) {
+                // Continue watching shelf.
+                if (continueWatching.isNotEmpty()) {
+                    item(key = "continue-watching") {
+                        Column {
+                            Text(
+                                text = "Continue watching",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                items(continueWatching, key = { it.itemKey }) { progress ->
+                                    ContinueWatchingCard(
+                                        progress = progress,
+                                        onClick = {
+                                            viewModel.openItem(
+                                                MediaItem(
+                                                    id = progress.itemKey.substringAfter('|'),
+                                                    providerId = progress.providerId,
+                                                    title = progress.title,
+                                                    type = MediaType.MOVIE,
+                                                    posterUrl = progress.posterUrl,
+                                                )
+                                            )
+                                            onItemClick(
+                                                MediaItem(
+                                                    id = progress.itemKey.substringAfter('|'),
+                                                    providerId = progress.providerId,
+                                                    title = progress.title,
+                                                    type = MediaType.MOVIE,
+                                                    posterUrl = progress.posterUrl,
+                                                )
+                                            )
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Hero: first item with a backdrop.
                 val hero = rows.firstOrNull { it.items.isNotEmpty() }
                     ?.items?.firstOrNull { it.backdropUrl != null || it.posterUrl != null }
@@ -157,6 +205,7 @@ fun HomeScreen(
                             items = row.items,
                             onItemClick = onItemClick,
                             onSeeAll = { onBrowseCatalog(row.catalog) },
+                            onHideRow = { viewModel.hideCatalog(row.catalog) },
                             providerName = { viewModel.providerName(it.providerId) },
                         )
                     }
@@ -249,4 +298,75 @@ private fun HeroCard(
             }
         }
     }
+}
+
+@Composable
+private fun ContinueWatchingCard(
+    progress: com.stormstream.app.data.WatchProgress,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(132.dp)
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            if (progress.posterUrl != null) {
+                AsyncImage(
+                    model = progress.posterUrl,
+                    contentDescription = progress.title,
+                    contentScale = ContentScale.Crop,
+                    placeholder = painterResource(R.drawable.ic_placeholder),
+                    error = painterResource(R.drawable.ic_placeholder),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            // Progress bar at the bottom of the poster.
+            LinearProgressIndicator(
+                progress = { progress.fraction.toFloat() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .align(Alignment.BottomCenter),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = Color.Black.copy(alpha = 0.5f),
+            )
+            // Resume badge.
+            Surface(
+                color = Color.Black.copy(alpha = 0.65f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp),
+            ) {
+                Text(
+                    text = formatDuration(progress.positionSec),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
+        Text(
+            text = progress.title,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+private fun formatDuration(seconds: Double): String {
+    val total = seconds.toLong()
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    return if (h > 0) "${h}h ${m}m left" else "${m}m left"
 }

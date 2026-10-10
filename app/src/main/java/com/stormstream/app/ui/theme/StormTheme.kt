@@ -83,12 +83,80 @@ private val StormLight = lightColorScheme(
 /** Gold used for rating stars. */
 val StormRatingGold @Composable get() = Color(0xFFFBBF24)
 
+/**
+ * Build the dark scheme for an accent: the accent becomes primary, with
+ * derived container/tint colors so the whole UI follows one choice.
+ */
+private fun darkSchemeFor(accent: StormAccent) = darkColorScheme(
+    primary = accent.mid,
+    onPrimary = Color(0xFF0B1220),
+    primaryContainer = accent.soft,
+    onPrimaryContainer = Color(0xFFDBEAFE),
+    secondary = accent.start,
+    onSecondary = Color(0xFF0B1220),
+    secondaryContainer = accent.soft,
+    onSecondaryContainer = Color(0xFFBAE6FD),
+    tertiary = accent.end,
+    onTertiary = Color(0xFF0B1220),
+    tertiaryContainer = accent.soft,
+    onTertiaryContainer = Color(0xFFDDD6FE),
+    background = Color(0xFF070B15),
+    onBackground = Color(0xFFE2E8F0),
+    surface = Color(0xFF0F172A),
+    onSurface = Color(0xFFE2E8F0),
+    surfaceVariant = Color(0xFF1E293B),
+    onSurfaceVariant = Color(0xFF94A3B8),
+    outline = Color(0xFF334155),
+    outlineVariant = Color(0xFF1E293B),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF450A0A),
+    errorContainer = Color(0xFF7F1D1D),
+    onErrorContainer = Color(0xFFFEE2E2),
+    surfaceTint = accent.mid,
+    inverseSurface = Color(0xFFE2E8F0),
+    inverseOnSurface = Color(0xFF0F172A),
+    scrim = Color(0xFF000000),
+)
+
+private fun lightSchemeFor(accent: StormAccent) = lightColorScheme(
+    primary = accent.end,
+    onPrimary = Color.White,
+    primaryContainer = accent.start.copy(alpha = 0.25f),
+    onPrimaryContainer = accent.end,
+    secondary = accent.start,
+    onSecondary = Color.White,
+    secondaryContainer = accent.start.copy(alpha = 0.2f),
+    onSecondaryContainer = accent.end,
+    tertiary = accent.end,
+    onTertiary = Color.White,
+    tertiaryContainer = accent.end.copy(alpha = 0.15f),
+    onTertiaryContainer = accent.end,
+    background = Color(0xFFF8FAFC),
+    onBackground = Color(0xFF0F172A),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF0F172A),
+    surfaceVariant = Color(0xFFF1F5F9),
+    onSurfaceVariant = Color(0xFF475569),
+    outline = Color(0xFFCBD5E1),
+    outlineVariant = Color(0xFFE2E8F0),
+    error = Color(0xFFDC2626),
+    onError = Color.White,
+    errorContainer = Color(0xFFFEE2E2),
+    onErrorContainer = Color(0xFF7F1D1D),
+    surfaceTint = accent.end,
+    inverseSurface = Color(0xFF1E293B),
+    inverseOnSurface = Color(0xFFF1F5F9),
+    scrim = Color(0xFF000000),
+)
+
 @Composable
 fun StormTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    accentKey: String = StormAccent.DEFAULT.key,
     content: @Composable () -> Unit,
 ) {
-    val colors = if (darkTheme) StormDark else StormLight
+    val accent = StormAccent.fromKey(accentKey)
+    val colors = if (darkTheme) darkSchemeFor(accent) else lightSchemeFor(accent)
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {

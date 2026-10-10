@@ -2,6 +2,7 @@ package com.stormstream.app.ui.screens
 
 import android.app.Activity
 import android.content.Context
+import android.os.Build
 import android.media.AudioManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -325,19 +326,13 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         ) {
             Box(Modifier.fillMaxSize()) {
-                // Top gradient + bar
+                // Top glass bar
                 Column(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    Color.Black.copy(alpha = 0.75f),
-                                    Color.Transparent,
-                                )
-                            )
-                        )
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(18.dp) else Modifier)
                         .padding(16.dp),
                 ) {
                     Row(
@@ -376,19 +371,13 @@ fun PlayerScreen(
                     }
                 }
 
-                // Bottom gradient + seek + buttons
+                // Bottom glass bar
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.85f),
-                                )
-                            )
-                        )
+                        .background(Color.Black.copy(alpha = 0.5f))
+                        .then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(18.dp) else Modifier)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
                     // Seek bar

@@ -5,6 +5,7 @@ import com.stormstream.app.data.Episode
 import com.stormstream.app.data.MediaItem
 import com.stormstream.app.data.SettingsStore
 import com.stormstream.app.data.StreamSource
+import com.stormstream.app.data.WatchProgressStore
 import com.stormstream.app.net.StormHttpClient
 import `is`.xyz.mpv.MPV
 import `is`.xyz.mpv.MPVNode
@@ -64,6 +65,7 @@ class MpvPlayerController private constructor(context: Context) {
 
     private val appContext = context.applicationContext
     private val settings = SettingsStore.get(appContext)
+    private val watchProgress = WatchProgressStore.get(appContext)
 
     @Volatile
     private var mpvView: StormMpvView? = null
@@ -174,8 +176,20 @@ class MpvPlayerController private constructor(context: Context) {
             }
         }
         scope.launch {
+            var lastRecorded = 0.0
             instance.propFlow<Double>("time-pos").collectLatest { pos ->
-                if (pos != null) _position.value = pos
+                if (pos != null) {
+                    _position.value = pos
+                    // Persist progress every ~5 s while playing (Continue watching).
+                    val item = currentItem
+                    if (item != null && pos - lastRecorded >= 5.0) {
+                        lastRecorded = pos
+                        val dur = _duration.value
+                        if (dur > 0) {
+                            runCatching { watchProgress.record(item, pos, dur) }
+                        }
+                    }
+                }
             }
         }
         scope.launch {
@@ -252,6 +266,7 @@ class MpvPlayerController private constructor(context: Context) {
                     when (map["reason"]?.asString()) {
                         "eof" -> {
                             _isBuffering.value = false
+                            com.stormstream.app.util.AppLog.log("Player", "end of file: ${currentItem?.title}")
                             _playbackEnded.tryEmit(Unit)
                         }
                         "error" -> {
@@ -260,6 +275,7 @@ class MpvPlayerController private constructor(context: Context) {
                                 ?: "Playback error"
                             _error.value = err
                             _isBuffering.value = false
+                            com.stormstream.app.util.AppLog.log("Player", "playback error: $err")
                         }
                         else -> Unit // stop / redirect / quit — nothing to do
                     }
@@ -312,6 +328,10 @@ class MpvPlayerController private constructor(context: Context) {
 
         // Load the stream (replace current playlist entry).
         runCatching { instance.command("loadfile", source.url, "replace") }
+        com.stormstream.app.util.AppLog.log(
+            "Player",
+            "play ${item.title} <- ${source.url.take(120)}",
+        )
 
         // Apply persisted player settings.
         scope.launch {
@@ -369,6 +389,14 @@ class MpvPlayerController private constructor(context: Context) {
 
     /** Stop playback and the background service (the libmpv instance stays alive). */
     fun stop() {
+        runCatching {
+            val item = currentItem
+            val pos = _position.value
+            val dur = _duration.value
+            if (item != null && pos > 0 && dur > 0) {
+                watchProgress.record(item, pos, dur)
+            }
+        }
         runCatching { mpv?.command("stop") }
         _isPlaying.value = false
         _position.value = 0.0

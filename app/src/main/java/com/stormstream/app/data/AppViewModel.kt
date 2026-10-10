@@ -5,7 +5,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import coil.imageLoader
 import com.stormstream.app.core.StormResult
+import com.stormstream.app.data.PluginSettingField
 import com.stormstream.app.player.MpvPlayerController
+import com.stormstream.app.data.WatchProgressStore
 import com.stormstream.app.providers.ProviderManager
 import com.stormstream.app.providers.plugin.PluginRepoManager
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -50,6 +52,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val providerManager = ProviderManager.get(app)
     private val extensionStore = ExtensionStore.get(app)
+    private val watchProgress = WatchProgressStore.get(app)
     val repoManager = PluginRepoManager(ProviderManager.http(app), providerManager, extensionStore)
     val settings = SettingsStore.get(app)
 
@@ -72,6 +75,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _homeRows = MutableStateFlow<List<HomeRow>>(emptyList())
     val homeRows: StateFlow<List<HomeRow>> = _homeRows.asStateFlow()
+
+    /** Items worth resuming (Continue watching), most recent first. */
+    val continueWatching: StateFlow<List<com.stormstream.app.data.WatchProgress>> =
+        watchProgress.progress
+            .map { map -> map.values.filter { it.resumable }.sortedByDescending { it.updatedAt }.take(20) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Position to seek to right after the next play() starts (resume). */
+    @Volatile
+    private var pendingResumeSec: Double? = null
+
+    /** Progress for the currently open item, if any. */
+    val currentProgress: StateFlow<com.stormstream.app.data.WatchProgress?> =
+        _selectedItem.map { item ->
+            item?.let { watchProgress.snapshot()[WatchProgressStore.keyFor(it.providerId, it.id)] }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     private val _homeRefreshing = MutableStateFlow(false)
     val homeRefreshing: StateFlow<Boolean> = _homeRefreshing.asStateFlow()
@@ -146,10 +165,51 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- home ----------
 
+    /** Home shelf keys the user hid ("providerId@catalogId"). */
+    val hiddenCatalogs: StateFlow<Set<String>> =
+        settings.hiddenCatalogs.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptySet(),
+        )
+
+    fun hideCatalog(catalog: CatalogRef) {
+        viewModelScope.launch {
+            val key = "${catalog.providerId}@${catalog.catalogId}"
+            settings.setHiddenCatalogs(hiddenCatalogs.value + key)
+        }
+    }
+
+    fun unhideCatalog(key: String) {
+        viewModelScope.launch {
+            settings.setHiddenCatalogs(hiddenCatalogs.value - key)
+        }
+    }
+
+    // ---------- per-extension settings (SkyStream manifests / Nuvio onSettings) ----------
+
+    suspend fun settingsFieldsFor(providerId: String): List<PluginSettingField>? =
+        providerManager.get(providerId)?.settingsFields()
+
+    suspend fun settingsValuesFor(providerId: String): Map<String, String> =
+        providerManager.get(providerId)?.getSettings() ?: emptyMap()
+
+    fun setSettingFor(providerId: String, key: String, value: String) {
+        viewModelScope.launch {
+            providerManager.get(providerId)?.setSetting(key, value)
+        }
+    }
+
+    fun setTmdbApiKey(value: String) {
+        viewModelScope.launch { settings.setTmdbApiKey(value) }
+    }
+
     fun refreshHome() {
         viewModelScope.launch {
             _homeRefreshing.value = true
+            val hidden = hiddenCatalogs.value
             val catalogs = providerManager.allHomeCatalogs()
+                .filter { "${it.providerId}@${it.catalogId}" !in hidden }
             _homeRows.value = catalogs.map { HomeRow(catalog = it, items = emptyList()) }
             coroutineScope {
                 catalogs.forEach { ref ->
@@ -192,6 +252,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun openItem(item: MediaItem) {
         viewModelScope.launch {
             _selectedItem.value = item
+            // Remember where to resume from (Continue watching).
+            val progress = watchProgress.snapshot()[WatchProgressStore.keyFor(item.providerId, item.id)]
+            pendingResumeSec = progress?.takeIf { it.resumable }?.positionSec
             _episodes.value = emptyList()
             _streams.value = emptyList()
             _selectedEpisode.value = null
@@ -292,6 +355,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun playSource(item: MediaItem, episode: Episode?, source: StreamSource) {
         player.play(item, episode, source)
+        // Resume from the saved position (Continue watching).
+        val resume = pendingResumeSec
+        pendingResumeSec = null
+        if (resume != null && resume > 5.0) {
+            player.seekTo(resume)
+        }
     }
 
     /** Play the episode before/after the current one (player prev/next buttons). */
@@ -492,6 +561,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- settings ----------
 
     fun setTheme(value: String) { viewModelScope.launch { settings.setTheme(value) } }
+    fun setAccent(value: String) { viewModelScope.launch { settings.setAccent(value) } }
     fun setHwdec(value: Boolean) { viewModelScope.launch { settings.setHwdec(value) } }
     fun setDefaultSpeed(value: Double) { viewModelScope.launch { settings.setDefaultSpeed(value) } }
     fun setAutoplayNext(value: Boolean) { viewModelScope.launch { settings.setAutoplayNext(value) } }
@@ -511,6 +581,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------- helpers ----------
+
+    fun clearProgress(item: MediaItem) {
+        viewModelScope.launch {
+            watchProgress.clear(WatchProgressStore.keyFor(item.providerId, item.id))
+        }
+    }
 
     fun providerName(providerId: String): String =
         providerManager.get(providerId)?.config?.name ?: providerId

@@ -65,13 +65,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             val viewModel: AppViewModel = viewModel()
             val theme by viewModel.settings.theme.collectAsState(initial = THEME_DARK)
+            val accent by viewModel.settings.accent.collectAsState(initial = "blue")
             val systemDark = isSystemInDarkTheme()
             val dark = when (theme) {
                 THEME_LIGHT -> false
                 THEME_SYSTEM -> systemDark
                 else -> true
             }
-            StormTheme(darkTheme = dark) {
+            StormTheme(darkTheme = dark, accentKey = accent) {
                 StormAppRoot(viewModel = viewModel)
             }
             RequestNotificationPermission()
@@ -224,7 +225,10 @@ private fun StormAppRoot(viewModel: AppViewModel) {
                 ExtensionsScreen(viewModel = viewModel)
             }
             composable(StormScreen.Settings.route) {
-                SettingsScreen(viewModel = viewModel)
+                SettingsScreen(
+                    viewModel = viewModel,
+                    onOpenLogs = { navController.navigate(StormScreen.Logs.route) },
+                )
             }
             composable(StormScreen.Detail.route) {
                 DetailScreen(
@@ -236,6 +240,11 @@ private fun StormAppRoot(viewModel: AppViewModel) {
             composable(StormScreen.Player.route) {
                 PlayerScreen(
                     viewModel = viewModel,
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(StormScreen.Logs.route) {
+                com.stormstream.app.ui.screens.LogsScreen(
                     onBack = { navController.popBackStack() },
                 )
             }

@@ -2,6 +2,7 @@ package com.stormstream.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -65,10 +66,16 @@ fun PosterCard(
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(14.dp))
+                // Aura ring: a faint accent wash around every poster (Hikari-style),
+                // replaced by a solid accent ring when focused.
                 .border(
-                    width = if (focused) 2.dp else 0.dp,
-                    color = if (focused) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    shape = RoundedCornerShape(14.dp)
+                    width = if (focused) 2.dp else 1.dp,
+                    brush = if (focused) {
+                        Brush.solid(MaterialTheme.colorScheme.primary)
+                    } else {
+                        Brush.solid(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+                    },
+                    shape = RoundedCornerShape(14.dp),
                 )
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {

@@ -75,6 +75,7 @@ fun DetailScreen(
     val streamsLoading by viewModel.streamsLoading.collectAsState()
     val detailLoading by viewModel.detailLoading.collectAsState()
     val selectedEpisode by viewModel.selectedEpisode.collectAsState()
+    val currentProgress by viewModel.currentProgress.collectAsState()
     val seasons by viewModel.seasons.collectAsState()
 
     var showStreamPicker by remember { mutableStateOf(false) }
@@ -109,6 +110,19 @@ fun DetailScreen(
                                         Icon(Icons.Default.PlayArrow, contentDescription = null)
                                         Spacer(Modifier.width(6.dp))
                                         Text(if (episodes.isEmpty()) "Play" else "Play episode")
+                                    }
+                                    val resumeProgress = currentProgress
+                                    if (resumeProgress != null && resumeProgress.resumable) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                onPlayStart()
+                                                viewModel.playSelected(openPicker = { showStreamPicker = true })
+                                            },
+                                        ) {
+                                            Icon(Icons.Default.Refresh, contentDescription = null)
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Resume")
+                                        }
                                     }
                                 }
                                 if (streamsLoading) {

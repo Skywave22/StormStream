@@ -161,6 +161,7 @@ class JsPluginRuntime(
             dialect = parsed.dialect
             StormResult.Ok(parsed)
         } catch (e: QuickJsException) {
+            com.stormstream.app.util.AppLog.log("JsRuntime", "plugin $pluginId failed to load", e)
             runCatching { qjs?.close() }
             quickJs = null
             StormResult.Err(StormError.Parse("JS plugin failed to load: ${e.message}", e))

@@ -3,6 +3,7 @@ package com.stormstream.app.ui.screens
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,19 +40,34 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stormstream.app.BuildConfig
 import com.stormstream.app.data.AppViewModel
+import com.stormstream.app.ui.theme.StormAccent
 import com.stormstream.app.data.THEME_DARK
 import com.stormstream.app.data.THEME_LIGHT
 import com.stormstream.app.data.THEME_SYSTEM
+import androidx.compose.material3.AssistChip
+import androidx.compose.material.icons.filled.Close
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: AppViewModel = viewModel(),
+    onOpenLogs: () -> Unit = {},
 ) {
     val theme by viewModel.settings.theme.collectAsState(initial = THEME_DARK)
+    val accentKey by viewModel.settings.accent.collectAsState(initial = "blue")
+    val tmdbApiKey by viewModel.settings.tmdbApiKey.collectAsState(initial = "")
+    val hiddenCatalogs by viewModel.hiddenCatalogs.collectAsState()
     val hwdec by viewModel.settings.hwdec.collectAsState(initial = true)
     val speed by viewModel.settings.defaultSpeed.collectAsState(initial = 1.0)
     val autoplay by viewModel.settings.autoplayNext.collectAsState(initial = true)
@@ -87,6 +103,27 @@ fun SettingsScreen(
                         }
                         ThemeRow("System", theme == THEME_SYSTEM) {
                             viewModel.setTheme(THEME_SYSTEM)
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "Accent color",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        StormAccent.entries.forEach { accent ->
+                            AccentSwatch(
+                                accent = accent,
+                                selected = accent.key == accentKey,
+                                onClick = { viewModel.setAccent(accent.key) },
+                            )
                         }
                     }
                 }
@@ -161,16 +198,66 @@ fun SettingsScreen(
             // ---------- data ----------
             item {
                 SettingsSection(title = "Data") {
+                    // TMDB API key (powers Nuvio plugin browsing).
+                    var tmdbKey by remember { mutableStateOf(tmdbApiKey) }
+                    OutlinedTextField(
+                        value = tmdbKey,
+                        onValueChange = {
+                            tmdbKey = it
+                            viewModel.setTmdbApiKey(it)
+                        },
+                        label = { Text("TMDB API key (optional)") },
+                        placeholder = { Text("Your own v3 key overrides the bundled ones") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                    // Hidden home shelves.
+                    if (hiddenCatalogs.isNotEmpty()) {
+                        Text(
+                            text = "Hidden home rows",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                        FlowRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            hiddenCatalogs.forEach { key ->
+                                AssistChip(
+                                    onClick = { viewModel.unhideCatalog(key) },
+                                    label = { Text(key.substringAfter('@')) },
+                                    trailingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Unhide",
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         OutlinedButton(
                             onClick = { viewModel.clearCaches() },
                             modifier = Modifier.weight(1f),
                         ) {
                             Text("Clear caches")
+                        }
+                        OutlinedButton(
+                            onClick = onOpenLogs,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Logs")
                         }
                     }
                 }
@@ -296,5 +383,44 @@ private fun SwitchRow(
             )
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun AccentSwatch(
+    accent: StormAccent,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Brush.linearGradient(listOf(accent.start, accent.end)))
+                .clickable(onClick = onClick)
+                .then(
+                    if (selected) {
+                        Modifier.border(
+                            width = 2.dp,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            shape = CircleShape,
+                        )
+                    } else Modifier
+                ),
+        )
+        Text(
+            text = accent.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) {
+                MaterialTheme.colorScheme.onBackground
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }

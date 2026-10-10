@@ -35,6 +35,12 @@ class SettingsStore(private val context: Context) {
     val subtitleScale: Flow<Double> = store.data.map { it[KEY_SUBSCALE] ?: 1.0 }
     /** User's own TMDB v3 API key (wins over the bundled public keys). */
     val tmdbApiKey: Flow<String> = store.data.map { it[KEY_TMDB_API_KEY] ?: "" }
+    /** Accent palette key (Settings → Appearance). */
+    val accent: Flow<String> = store.data.map { it[KEY_ACCENT] ?: "blue" }
+    /** Home shelf keys ("providerId@catalogId") the user hid. */
+    val hiddenCatalogs: Flow<Set<String>> = store.data.map { prefs ->
+        (prefs[KEY_HIDDEN_CATALOGS] ?: "").split(',').filter { it.isNotBlank() }.toSet()
+    }
 
     suspend fun setTheme(value: String) { store.edit { it[KEY_THEME] = value } }
     suspend fun setHwdec(value: Boolean) { store.edit { it[KEY_HWDEC] = value } }
@@ -43,6 +49,10 @@ class SettingsStore(private val context: Context) {
     suspend fun setShowAdult(value: Boolean) { store.edit { it[KEY_ADULT] = value } }
     suspend fun setSubtitleScale(value: Double) { store.edit { it[KEY_SUBSCALE] = value } }
     suspend fun setTmdbApiKey(value: String) { store.edit { it[KEY_TMDB_API_KEY] = value.trim() } }
+    suspend fun setAccent(value: String) { store.edit { it[KEY_ACCENT] = value } }
+    suspend fun setHiddenCatalogs(value: Set<String>) {
+        store.edit { it[KEY_HIDDEN_CATALOGS] = value.joinToString(",") }
+    }
 
     companion object {
         private val KEY_THEME = stringPreferencesKey("theme")
@@ -52,6 +62,8 @@ class SettingsStore(private val context: Context) {
         private val KEY_ADULT = booleanPreferencesKey("show_adult")
         private val KEY_SUBSCALE = doublePreferencesKey("subtitle_scale")
         private val KEY_TMDB_API_KEY = stringPreferencesKey("tmdb_api_key")
+        private val KEY_ACCENT = stringPreferencesKey("accent")
+        private val KEY_HIDDEN_CATALOGS = stringPreferencesKey("hidden_catalogs")
 
         @Volatile
         private var instance: SettingsStore? = null

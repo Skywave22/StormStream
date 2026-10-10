@@ -11,6 +11,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,6 +27,7 @@ fun ContentRow(
     items: List<MediaItem>,
     onItemClick: (MediaItem) -> Unit,
     onSeeAll: (() -> Unit)? = null,
+    onHideRow: (() -> Unit)? = null,
     providerName: (MediaItem) -> String? = { null },
     modifier: Modifier = Modifier,
 ) {
@@ -50,9 +53,20 @@ fun ContentRow(
                     )
                 }
             }
-            if (onSeeAll != null) {
-                TextButton(onClick = onSeeAll) {
-                    Text("See all")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onSeeAll != null) {
+                    TextButton(onClick = onSeeAll) {
+                        Text("See all")
+                    }
+                }
+                if (onHideRow != null) {
+                    IconButton(onClick = onHideRow) {
+                        Icon(
+                            imageVector = Icons.Default.VisibilityOff,
+                            contentDescription = "Hide row",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }

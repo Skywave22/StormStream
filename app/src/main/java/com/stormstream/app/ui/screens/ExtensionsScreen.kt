@@ -60,6 +60,10 @@ import com.stormstream.app.data.InstalledExtension
 import com.stormstream.app.data.RepoEntry
 import com.stormstream.app.data.RepoPlugin
 import com.stormstream.app.providers.plugin.PluginRepoManager
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.stormstream.app.data.PluginSettingField
+import androidx.compose.material.icons.filled.Settings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,6 +78,7 @@ fun ExtensionsScreen(
 
     var showAddMenu by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<AddDialog?>(null) }
+    var settingsFor by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -161,6 +166,10 @@ fun ExtensionsScreen(
                         extension = ext,
                         typeLabel = viewModel.providerTypeLabel(ext.config.type),
                         error = errors[ext.config.id],
+                        hasSettings = ext.config.type == com.stormstream.app.data.ProviderType.SKYSTREAM ||
+                            ext.config.type == com.stormstream.app.data.ProviderType.NUVIO ||
+                            ext.config.type == com.stormstream.app.data.ProviderType.JS,
+                        onOpenSettings = { settingsFor = ext.config.id },
                         onToggle = { enabled -> viewModel.setExtensionEnabled(ext.config.id, enabled) },
                         onRemove = { viewModel.uninstallExtension(ext.config.id) },
                     )
@@ -198,6 +207,17 @@ fun ExtensionsScreen(
                 }
             }
         }
+    }
+
+    // ---------- extension settings dialog ----------
+    val settingsProviderId = settingsFor
+    if (settingsProviderId != null) {
+        ExtensionSettingsDialog(
+            providerId = settingsProviderId,
+            providerName = viewModel.providerName(settingsProviderId),
+            viewModel = viewModel,
+            onDismiss = { settingsFor = null },
+        )
     }
 
     // ---------- dialogs ----------
@@ -255,6 +275,8 @@ private fun ExtensionCard(
     extension: InstalledExtension,
     typeLabel: String,
     error: String?,
+    hasSettings: Boolean = false,
+    onOpenSettings: (() -> Unit)? = null,
     onToggle: (Boolean) -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -314,6 +336,15 @@ private fun ExtensionCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                if (hasSettings && onOpenSettings != null) {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Extension settings",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 Switch(
                     checked = extension.config.enabled,
@@ -632,5 +663,127 @@ private fun JsPluginDialog(
             ) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ExtensionSettingsDialog(
+    providerId: String,
+    providerName: String,
+    viewModel: AppViewModel,
+    onDismiss: () -> Unit,
+) {
+    var fields by remember { mutableStateOf<List<PluginSettingField>?>(null) }
+    var values by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(providerId) {
+        runCatching {
+            fields = viewModel.settingsFieldsFor(providerId)
+            values = viewModel.settingsValuesFor(providerId)
+        }.onFailure {
+            loadError = it.message ?: "Failed to load settings"
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("$providerName settings") },
+        text = {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                when {
+                    loadError != null -> Text(
+                        loadError!!,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    fields == null -> Text("Loading…")
+                    fields!!.isEmpty() -> Text("This extension has no settings.")
+                    else -> fields!!.forEach { field ->
+                        when (field.type) {
+                            "info" -> {
+                                if (field.title.isNotBlank()) {
+                                    Text(
+                                        text = field.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        modifier = Modifier.padding(vertical = 8.dp),
+                                    )
+                                }
+                                if (field.description != null) {
+                                    Text(
+                                        text = field.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            "bool" -> {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = field.title,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Switch(
+                                        checked = (values[field.key] ?: field.defaultValue) == "true",
+                                        onCheckedChange = { on ->
+                                            values = values + (field.key to on.toString())
+                                            viewModel.setSettingFor(providerId, field.key, on.toString())
+                                        },
+                                    )
+                                }
+                            }
+                            "select" -> {
+                                var expanded by remember { mutableStateOf(false) }
+                                Column(Modifier.padding(vertical = 4.dp)) {
+                                    Text(text = field.title)
+                                    OutlinedButton(
+                                        onClick = { expanded = true },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(
+                                            values[field.key] ?: field.defaultValue.ifBlank { "Select…" },
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = expanded,
+                                        onDismissRequest = { expanded = false },
+                                    ) {
+                                        field.options.forEach { option ->
+                                            DropdownMenuItem(
+                                                text = { Text(option.label) },
+                                                onClick = {
+                                                    expanded = false
+                                                    values = values + (field.key to option.value)
+                                                    viewModel.setSettingFor(providerId, field.key, option.value)
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            else -> {
+                                OutlinedTextField(
+                                    value = values[field.key] ?: field.defaultValue,
+                                    onValueChange = { v ->
+                                        values = values + (field.key to v)
+                                        viewModel.setSettingFor(providerId, field.key, v)
+                                    },
+                                    label = { Text(field.title) },
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        },
     )
 }

@@ -92,6 +92,7 @@ class ProviderManager private constructor(
         }
         _providerErrors.value = _providerErrors.value - provider.config.id
         Log.i(TAG, "Registered provider ${provider.config.id} (${provider.config.type})")
+        com.stormstream.app.util.AppLog.log("Providers", "registered ${provider.config.id} (${provider.config.type})")
     }
 
     private suspend fun unregister(providerId: String) {
@@ -430,6 +431,7 @@ class ProviderManager private constructor(
                 if (r is StormResult.Err) {
                     setError(ext.config.id, r.error.message)
                     Log.w(TAG, "Failed to restore ${ext.config.id}: ${r.error.message}")
+                    com.stormstream.app.util.AppLog.log("Providers", "restore failed ${ext.config.id}", r.error.cause)
                 }
             }
         }.awaitAll()
