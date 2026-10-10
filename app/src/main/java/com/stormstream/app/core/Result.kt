@@ -21,7 +21,7 @@ sealed class StormResult<out T> {
     fun getOrNull(): T? = (this as? Ok)?.value
 }
 
-sealed class StormError(val message: String, val cause: Throwable? = null) {
+sealed class StormError(override val message: String, override val cause: Throwable? = null) : Throwable(message, cause) {
     class Network(message: String, cause: Throwable? = null) : StormError(message, cause)
     class Parse(message: String, cause: Throwable? = null) : StormError(message, cause)
     class NotInstalled(providerId: String) : StormError("Provider $providerId is not installed")

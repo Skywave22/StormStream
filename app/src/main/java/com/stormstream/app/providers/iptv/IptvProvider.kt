@@ -130,6 +130,7 @@ class IptvProvider(
         var pendingLogo: String? = null
         var pendingGroup: String? = null
         var pendingTvgId: String? = null
+        var pendingHeaders: Map<String, String> = emptyMap()
         while (i < lines.size) {
             val line = lines[i].trim()
             when {
@@ -140,8 +141,9 @@ class IptvProvider(
                     val comma = line.indexOf(',')
                     pendingName = if (comma >= 0) line.substring(comma + 1).trim() else null
                     pendingLogo = extractAttr(line, "tvg-logo")
-                    pendingGroup = extractAttr(line, "group-title") ?: pendingGroup
+                    pendingGroup = extractAttr(line, "group-title")
                     pendingTvgId = extractAttr(line, "tvg-id")
+                    pendingHeaders = extractIptvHeaders(line)
                 }
                 line.startsWith("#EXTGRP:") -> {
                     pendingGroup = line.removePrefix("#EXTGRP:").trim()
@@ -157,9 +159,13 @@ class IptvProvider(
                         logo = pendingLogo,
                         group = pendingGroup,
                         url = url,
+                        headers = pendingHeaders,
                     )
                     pendingName = null
                     pendingLogo = null
+                    pendingGroup = null
+                    pendingTvgId = null
+                    pendingHeaders = emptyMap()
                 }
             }
             i++
@@ -170,5 +176,19 @@ class IptvProvider(
     private fun extractAttr(line: String, key: String): String? {
         val pattern = Regex("""$key="([^"]*)"""")
         return pattern.find(line)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Pull the HTTP headers IPTV playlists smuggle inside #EXTINF attributes
+     * (http-referrer / http-user-agent and their aliases). Many IPTV streams
+     * answer 403 without the right Referer.
+     */
+    private fun extractIptvHeaders(line: String): Map<String, String> {
+        val headers = mutableMapOf<String, String>()
+        extractAttr(line, "http-referrer")?.let { headers["Referer"] = it }
+        extractAttr(line, "referrer")?.let { headers["Referer"] = it }
+        extractAttr(line, "http-user-agent")?.let { headers["User-Agent"] = it }
+        extractAttr(line, "user-agent")?.let { headers["User-Agent"] = it }
+        return headers
     }
 }

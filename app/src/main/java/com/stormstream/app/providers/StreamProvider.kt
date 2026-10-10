@@ -4,6 +4,7 @@ import com.stormstream.app.core.StormResult
 import com.stormstream.app.data.CatalogRef
 import com.stormstream.app.data.Episode
 import com.stormstream.app.data.MediaItem
+import com.stormstream.app.data.PluginSettingField
 import com.stormstream.app.data.ProviderConfig
 import com.stormstream.app.data.StreamSource
 
@@ -11,10 +12,9 @@ import com.stormstream.app.data.StreamSource
  * The single contract every provider backend in StormStream must satisfy.
  *
  * Provider-specific adapters (StremioAddonProvider, UniversalScraperProvider,
- * Cs3Provider, VegaProvider, SkyStreamProvider, SoraProvider, AniyomiProvider,
- * NuvioProvider, IptvProvider, MangaProvider, StormNativeProvider) implement
- * this interface. The UI, database and player talk ONLY to this interface —
- * they never know which backend a MediaItem came from.
+ * IptvProvider, JsProvider) implement this interface. The UI, persistence and
+ * player talk ONLY to this interface — they never know which backend a
+ * MediaItem came from.
  *
  * All methods are suspending and may throw. [ProviderManager] catches and wraps
  * everything into [StormResult] so callers get uniform error handling.
@@ -41,6 +41,19 @@ interface StreamProvider {
 
     /** Whether this EXTENSION is itself adult/NSFW (asked once at install). */
     fun isAdultExtension(): Boolean? = config.adult
+
+    /**
+     * Declarative settings fields this provider exposes (SkyStream manifest
+     * settings / Nuvio `onSettings()` layout), or null when it has none. The
+     * app renders these as the extension's settings dialog.
+     */
+    suspend fun settingsFields(): List<PluginSettingField>? = null
+
+    /** Current setting values (key → value). */
+    suspend fun getSettings(): Map<String, String> = emptyMap()
+
+    /** Persist one setting value. */
+    suspend fun setSetting(key: String, value: String) {}
 
     // ---------- Discovery ----------
 

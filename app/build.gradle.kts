@@ -2,21 +2,25 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+    // AGP 9.x has built-in Kotlin support: do NOT apply org.jetbrains.kotlin.android.
+    // The Kotlin Gradle plugin arrives via the compose/serialization plugins below.
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
     namespace = "com.stormstream.app"
-    compileSdk = 34
+    // compileSdk 37: the Compose BOM 2026.08.00 artifacts are built with compileSdk 37
+    // (mpv-android-lib / quickjs-kt / ksoup need >= 36; AGP checkDebugAarMetadata
+    // fails when the app's compileSdk is lower than a dependency's).
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.stormstream.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -31,12 +35,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_17)
-        }
-    }
-
     buildFeatures {
         compose = true
         buildConfig = true
@@ -46,6 +44,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
     }
 }
 
@@ -60,7 +64,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material)
     implementation(libs.androidx.compose.material.icons)
     implementation(libs.androidx.navigation.compose)
 
@@ -70,13 +73,14 @@ dependencies {
     implementation(libs.jsoup)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.datastore.preferences)
 
-    implementation(libs.media3.exoplayer)
-    implementation(libs.media3.ui)
-    implementation(libs.media3.common)
-    implementation(libs.media3.dash)
-    implementation(libs.media3.hls)
-    implementation(libs.media3.session)
+    // The one and only player: internal libmpv (bundled in the AAR).
+    implementation(libs.mpv.android.lib)
+    // In-app JavaScript runtime for extension plugins (QuickJS).
+    implementation(libs.quickjs.kt)
+    // HTML parsing (jsoup-compatible API) exposed to JS plugins.
+    implementation(libs.ksoup)
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

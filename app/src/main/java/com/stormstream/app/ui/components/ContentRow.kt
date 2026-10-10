@@ -1,37 +1,74 @@
 package com.stormstream.app.ui.components
 
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.stormstream.app.data.MediaItem
 
+/** A horizontal scrollable row of posters with a header (title + "See all"). */
 @Composable
 fun ContentRow(
     title: String,
     subtitle: String? = null,
     items: List<MediaItem>,
     onItemClick: (MediaItem) -> Unit,
+    onSeeAll: (() -> Unit)? = null,
+    onHideRow: (() -> Unit)? = null,
+    providerName: (MediaItem) -> String? = { null },
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.padding(vertical = 8.dp)) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.Bottom,
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Column {
-                Text(title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
                 if (subtitle != null) {
-                    Text(subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onSeeAll != null) {
+                    TextButton(onClick = onSeeAll) {
+                        Text("See all")
+                    }
+                }
+                if (onHideRow != null) {
+                    IconButton(onClick = onHideRow) {
+                        Icon(
+                            imageVector = Icons.Default.VisibilityOff,
+                            contentDescription = "Hide row",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -40,12 +77,11 @@ fun ContentRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             items(items, key = { it.id + "@" + it.providerId }) { item ->
-                if (item.type == com.stormstream.app.data.MediaType.IPTV) {
-                    ChannelCard(item = item, onClick = { onItemClick(item) },
-                        modifier = Modifier.width(280.dp))
-                } else {
-                    PosterCard(item = item, onClick = { onItemClick(item) })
-                }
+                PosterCard(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                    providerName = providerName(item),
+                )
             }
         }
     }

@@ -11,7 +11,6 @@ import com.stormstream.app.data.StreamType
 import com.stormstream.app.net.StormHttpClient
 import com.stormstream.app.providers.StreamProvider
 import com.stormstream.app.util.StormJson
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -41,7 +40,7 @@ class UniversalScraperProvider(
     override val config: ProviderConfig = ProviderConfig(
         id = "scraper:${cfg.id ?: cfg.name}",
         name = cfg.name,
-        type = ProviderType.UNIVERSAL_SCRAPER,
+        type = ProviderType.SCRAPER,
         icon = cfg.icon,
         baseUrl = cfg.baseUrl,
         supportedMediaTypes = cfg.catalogs.map { it.mediaType }.toSet(),

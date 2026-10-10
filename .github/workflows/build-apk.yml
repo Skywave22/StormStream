@@ -28,15 +28,30 @@ jobs:
         run: |
           set -e
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          # cmdline-tools 13114758 (2025-06) — the 2024 build (11076708) cannot
+          # install the android-37 platform used by compileSdk 37.
           curl -fsSL -o /tmp/cmdline-tools.zip \
-            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            "https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip"
           unzip -q -d /tmp/cmdline-tools /tmp/cmdline-tools.zip
           rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           mv /tmp/cmdline-tools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null 2>&1 || true
+          set -o pipefail
+          # Note: API 37+ platform packages carry the minor revision: android-37.0
           sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
-              "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+              "platform-tools" "platforms;android-37.0" \
+              "build-tools;34.0.0" "build-tools;36.0.0" "build-tools;37.0.0" \
+              2>&1 | tee sdk-setup.log || {
+                echo "::error title=SDK setup failed::sdkmanager could not install the Android SDK components"
+                tail -n 30 sdk-setup.log | while IFS= read -r line; do
+                  escaped=${line//'%'/'%25'}
+                  escaped=${escaped//$'\r'/'%0D'}
+                  echo "::error::$escaped"
+                done
+                exit 1
+              }
+          set +o pipefail
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
           echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
@@ -48,7 +63,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           add-job-summary: on-failure
-          gradle-version: "8.9"
+          gradle-version: "9.7.1"
 
       - name: Build debug APK
         run: |
