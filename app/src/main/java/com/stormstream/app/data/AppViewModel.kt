@@ -3,40 +3,87 @@ package com.stormstream.app.data
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import coil.imageLoader
 import com.stormstream.app.core.StormResult
-import com.stormstream.app.data.CatalogRef
-import com.stormstream.app.data.Episode
-import com.stormstream.app.data.MediaItem
-import com.stormstream.app.data.RepoIndex
-import com.stormstream.app.data.RepoPlugin
-import com.stormstream.app.data.StreamSource
+import com.stormstream.app.player.MpvPlayerController
 import com.stormstream.app.providers.ProviderManager
 import com.stormstream.app.providers.plugin.PluginRepoManager
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+/** One row on the Home screen: a catalog plus its first page of items. */
+data class HomeRow(
+    val catalog: CatalogRef,
+    val items: List<MediaItem>,
+    val isLoading: Boolean = true,
+    val error: String? = null,
+)
+
+/** Paged state for the Browse screen. */
+data class BrowseState(
+    val catalog: CatalogRef,
+    val items: List<MediaItem>,
+    val page: Int,
+    val isLoading: Boolean,
+    val endReached: Boolean,
+    val error: String?,
+)
+
+private const val HOME_ROW_LIMIT = 20
+private const val BROWSE_PAGE_SIZE = 24
+
 /**
- * Single shared ViewModel for the app. In a production build this would be
- * split into per-screen ViewModels; for a seed project one shared VM keeps
- * the wiring simple and readable.
+ * Single shared ViewModel: home rows, search, detail/streams, browse,
+ * extension management and settings. The player itself is the app-scoped
+ * [MpvPlayerController] (internal libmpv).
  */
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val providerManager = ProviderManager.get(app)
-    val repoManager = PluginRepoManager(ProviderManager.http(app), providerManager)
+    private val extensionStore = ExtensionStore.get(app)
+    val repoManager = PluginRepoManager(ProviderManager.http(app), providerManager, extensionStore)
+    val settings = SettingsStore.get(app)
 
-    val providers = providerManager.providers
+    /** The one player: internal libmpv. */
+    val player: MpvPlayerController = MpvPlayerController.get(app)
 
-    private val _homeState = MutableStateFlow<Map<CatalogRef, List<MediaItem>>>(emptyMap())
-    val homeState: StateFlow<Map<CatalogRef, List<MediaItem>>> = _homeState.asStateFlow()
+    // ---------- messages (snackbar) ----------
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val messages: SharedFlow<String> = _messages
+
+    private fun message(text: String) { _messages.tryEmit(text) }
+
+    // ---------- busy ----------
+
+    private val _busy = MutableStateFlow(false)
+    val busy: StateFlow<Boolean> = _busy.asStateFlow()
+
+    // ---------- home ----------
+
+    private val _homeRows = MutableStateFlow<List<HomeRow>>(emptyList())
+    val homeRows: StateFlow<List<HomeRow>> = _homeRows.asStateFlow()
+
+    private val _homeRefreshing = MutableStateFlow(false)
+    val homeRefreshing: StateFlow<Boolean> = _homeRefreshing.asStateFlow()
+
+    // ---------- search ----------
 
     private val _searchResults = MutableStateFlow<List<MediaItem>>(emptyList())
     val searchResults: StateFlow<List<MediaItem>> = _searchResults.asStateFlow()
 
-    private val _loading = MutableStateFlow(true)
-    val loading: StateFlow<Boolean> = _loading.asStateFlow()
+    private val _searching = MutableStateFlow(false)
+    val searching: StateFlow<Boolean> = _searching.asStateFlow()
+
+    // ---------- detail ----------
 
     private val _selectedItem = MutableStateFlow<MediaItem?>(null)
     val selectedItem: StateFlow<MediaItem?> = _selectedItem.asStateFlow()
@@ -47,97 +94,416 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _streams = MutableStateFlow<List<StreamSource>>(emptyList())
     val streams: StateFlow<List<StreamSource>> = _streams.asStateFlow()
 
-    private val _repos = MutableStateFlow<Map<String, RepoIndex>>(emptyMap())
-    val repos: StateFlow<Map<String, RepoIndex>> = _repos.asStateFlow()
+    private val _detailLoading = MutableStateFlow(false)
+    val detailLoading: StateFlow<Boolean> = _detailLoading.asStateFlow()
+
+    private val _streamsLoading = MutableStateFlow(false)
+    val streamsLoading: StateFlow<Boolean> = _streamsLoading.asStateFlow()
+
+    private val _selectedEpisode = MutableStateFlow<Episode?>(null)
+    val selectedEpisode: StateFlow<Episode?> = _selectedEpisode.asStateFlow()
+
+    val seasons: StateFlow<List<Int>> = MutableStateFlow<List<Int>>(emptyList()).also { flow ->
+        viewModelScope.launch {
+            _episodes.collect { eps ->
+                flow.value = eps.map { it.season }.distinct().sorted()
+            }
+        }
+    }
+
+    // ---------- browse ----------
+
+    private val _browse = MutableStateFlow<BrowseState?>(null)
+    val browse: StateFlow<BrowseState?> = _browse.asStateFlow()
+
+    // ---------- extensions ----------
+
+    val installedExtensions: StateFlow<List<InstalledExtension>> =
+        extensionStore.extensions.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList(),
+        )
+
+    val providerErrors: StateFlow<Map<String, String>> = providerManager.providerErrors
+    val repoStates = repoManager.repoStates
+    val repoEntries = repoManager.repoEntries
 
     init {
         viewModelScope.launch {
-            providerManager.bootstrapDefaults()
+            val hadExtensions = extensionStore.extensionsSnapshot().isNotEmpty()
+            providerManager.restore()
+            if (!hadExtensions) {
+                providerManager.bootstrapDefaultsIfNeeded()
+            }
+            repoManager.loadAll()
             refreshHome()
-            _loading.value = false
         }
     }
+
+    // ---------- home ----------
 
     fun refreshHome() {
         viewModelScope.launch {
+            _homeRefreshing.value = true
             val catalogs = providerManager.allHomeCatalogs()
-            val map = mutableMapOf<CatalogRef, List<MediaItem>>()
+            _homeRows.value = catalogs.map { HomeRow(catalog = it, items = emptyList()) }
             catalogs.forEach { ref ->
-                val r = providerManager.catalogPage(ref, 1)
-                if (r is StormResult.Ok) map[ref] = r.value
+                launch {
+                    val r = providerManager.catalogPage(ref, 1)
+                    _homeRows.value = _homeRows.value.map { row ->
+                        if (row.catalog != ref) return@map row
+                        when (r) {
+                            is StormResult.Ok -> row.copy(
+                                items = r.value.filterAdult().take(HOME_ROW_LIMIT),
+                                isLoading = false,
+                            )
+                            is StormResult.Err -> row.copy(isLoading = false, error = r.error.message)
+                        }
+                    }
+                }
             }
-            _homeState.value = map
+            _homeRefreshing.value = false
         }
     }
 
+    // ---------- search ----------
+
     fun search(query: String) {
-        if (query.isBlank()) { _searchResults.value = emptyList(); return }
+        if (query.isBlank()) {
+            _searchResults.value = emptyList()
+            return
+        }
         viewModelScope.launch {
+            _searching.value = true
             val r = providerManager.searchAll(query, 1)
-            _searchResults.value = (r as? StormResult.Ok)?.value ?: emptyList()
+            _searchResults.value = (r as? StormResult.Ok)?.value?.filterAdult() ?: emptyList()
+            _searching.value = false
         }
     }
+
+    // ---------- detail ----------
 
     fun openItem(item: MediaItem) {
         viewModelScope.launch {
             _selectedItem.value = item
-            _streams.value = emptyList()
             _episodes.value = emptyList()
+            _streams.value = emptyList()
+            _selectedEpisode.value = null
+            _detailLoading.value = true
             val meta = providerManager.getMeta(item)
             val resolved = (meta as? StormResult.Ok)?.value ?: item
             _selectedItem.value = resolved
             val eps = providerManager.getEpisodes(resolved)
-            _episodes.value = (eps as? StormResult.Ok)?.value ?: emptyList()
-            if (eps is StormResult.Ok && eps.value == null) {
-                // Movie — resolve streams immediately.
+            val epsList = (eps as? StormResult.Ok)?.value
+            _episodes.value = epsList ?: emptyList()
+            _detailLoading.value = false
+            if (epsList == null) {
+                // Movie / single-stream item — resolve streams right away.
                 loadStreams(resolved, null)
+            }
+        }
+    }
+
+    /** Select an episode and resolve its streams. */
+    fun selectEpisode(episode: Episode, autoPlay: Boolean = false) {
+        val item = _selectedItem.value ?: return
+        _selectedEpisode.value = episode
+        viewModelScope.launch {
+            loadStreams(item, episode)
+            if (autoPlay) {
+                playFirstLoadedStream(item, episode)
             }
         }
     }
 
     fun loadStreams(item: MediaItem, episode: Episode?) {
         viewModelScope.launch {
+            _streamsLoading.value = true
+            _streams.value = emptyList()
             val r = providerManager.getStreams(item, episode)
             _streams.value = (r as? StormResult.Ok)?.value ?: emptyList()
+            _streamsLoading.value = false
         }
     }
 
-    fun installStremio(url: String, onDone: (Boolean) -> Unit = {}) {
+    /**
+     * "Play" button behavior: ensure streams are loaded for the current
+     * selection, then either open the picker (multiple streams) or play the
+     * first one directly.
+     */
+    fun playSelected(openPicker: () -> Unit) {
+        val item = _selectedItem.value ?: return
+        val eps = _episodes.value
+        if (eps.isEmpty()) {
+            // Movie / single item.
+            if (_streams.value.isNotEmpty()) {
+                dispatchPlay(item, null, openPicker)
+            } else {
+                viewModelScope.launch {
+                    loadStreamsSuspend(item, null)
+                    dispatchPlay(item, null, openPicker)
+                }
+            }
+            return
+        }
+        val target = _selectedEpisode.value ?: eps.first()
+        if (_selectedEpisode.value?.id == target.id && _streams.value.isNotEmpty()) {
+            dispatchPlay(item, target, openPicker)
+        } else {
+            viewModelScope.launch {
+                _selectedEpisode.value = target
+                loadStreamsSuspend(item, target)
+                dispatchPlay(item, target, openPicker)
+            }
+        }
+    }
+
+    private suspend fun loadStreamsSuspend(item: MediaItem, episode: Episode?) {
+        _streamsLoading.value = true
+        _streams.value = emptyList()
+        val r = providerManager.getStreams(item, episode)
+        _streams.value = (r as? StormResult.Ok)?.value ?: emptyList()
+        _streamsLoading.value = false
+    }
+
+    private fun dispatchPlay(item: MediaItem, episode: Episode?, openPicker: () -> Unit) {
+        val source = _streams.value.firstOrNull()
+        if (source == null) {
+            message("No streams found for this item")
+            return
+        }
+        if (_streams.value.size > 1) {
+            openPicker()
+        } else {
+            playSource(item, episode, source)
+        }
+    }
+
+    private fun playFirstLoadedStream(item: MediaItem, episode: Episode) {
+        val source = _streams.value.firstOrNull() ?: return
+        playSource(item, episode, source)
+    }
+
+    fun playSource(item: MediaItem, episode: Episode?, source: StreamSource) {
+        player.play(item, episode, source)
+    }
+
+    /** Play the episode before/after the current one (player prev/next buttons). */
+    fun playAdjacentEpisode(delta: Int) {
+        val item = _selectedItem.value ?: return
+        val eps = _episodes.value
+        if (eps.isEmpty()) return
+        val currentId = player.currentEpisode?.id ?: _selectedEpisode.value?.id
+        val idx = eps.indexOfFirst { it.id == currentId }
+        val target = when {
+            idx < 0 -> if (delta > 0) eps.firstOrNull() else eps.lastOrNull()
+            else -> eps.getOrNull(idx + delta)
+        } ?: return
+        selectEpisode(target, autoPlay = true)
+    }
+
+    /** Auto-play the next episode when the current one ends. */
+    fun playNextEpisode() {
         viewModelScope.launch {
-            val r = providerManager.installStremioAddon(url)
-            onDone(r is StormResult.Ok)
+            if (!settings.autoplayNext.first()) {
+                player.stop()
+                return@launch
+            }
+            val item = _selectedItem.value
+            val eps = _episodes.value
+            if (item == null || eps.isEmpty()) {
+                player.stop()
+                return@launch
+            }
+            val currentId = player.currentEpisode?.id
+            val next = if (currentId == null) {
+                eps.firstOrNull()
+            } else {
+                eps.dropWhile { it.id != currentId }.drop(1).firstOrNull()
+            }
+            if (next == null) {
+                player.stop()
+                return@launch
+            }
+            _selectedEpisode.value = next
+            loadStreamsSuspend(item, next)
+            val source = _streams.value.firstOrNull()
+            if (source != null) {
+                player.play(item, next, source)
+            } else {
+                player.stop()
+            }
+        }
+    }
+
+    // ---------- browse ----------
+
+    fun openBrowse(catalog: CatalogRef) {
+        _browse.value = BrowseState(
+            catalog = catalog,
+            items = emptyList(),
+            page = 0,
+            isLoading = true,
+            endReached = false,
+            error = null,
+        )
+        loadBrowsePage()
+    }
+
+    fun loadBrowsePage() {
+        val state = _browse.value ?: return
+        if (state.isLoading || state.endReached) return
+        viewModelScope.launch {
+            _browse.value = _browse.value?.copy(isLoading = true)
+            val r = providerManager.catalogPage(state.catalog, state.page + 1)
+            _browse.value = when (r) {
+                is StormResult.Ok -> {
+                    val newItems = r.value.filterAdult()
+                    state.copy(
+                        items = (state.items + newItems).distinctBy { it.id + it.providerId },
+                        page = state.page + 1,
+                        isLoading = false,
+                        endReached = newItems.size < BROWSE_PAGE_SIZE,
+                        error = null,
+                    )
+                }
+                is StormResult.Err -> state.copy(isLoading = false, error = r.error.message)
+            }
+        }
+    }
+
+    // ---------- extensions ----------
+
+    fun installStremio(url: String) = runInstall("Stremio addon") {
+        providerManager.installStremioAddon(url)
+    }
+
+    fun installScraper(json: String) = runInstall("Scraper") {
+        providerManager.installScraperConfig(json)
+    }
+
+    fun installIptv(name: String, url: String) = runInstall("IPTV playlist") {
+        providerManager.installIptvPlaylist(name, url)
+    }
+
+    fun installJsPlugin(url: String, name: String?) = runInstall("JS plugin") {
+        providerManager.installJsPlugin(url, fallbackName = name)
+    }
+
+    fun addRepo(url: String) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                repoManager.addRepo(url)
+                message("Repository added")
+            } catch (e: Throwable) {
+                message("Failed to load repo: ${e.message}")
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun refreshRepo(url: String) {
+        viewModelScope.launch {
+            runCatching { repoManager.refreshRepo(url) }
+        }
+    }
+
+    fun removeRepo(url: String) {
+        viewModelScope.launch {
+            repoManager.removeRepo(url)
+        }
+    }
+
+    fun installPlugin(plugin: RepoPlugin) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                when (val r = repoManager.installPlugin(plugin)) {
+                    is StormResult.Ok -> message("Installed ${plugin.name}")
+                    is StormResult.Err -> message("Failed to install ${plugin.name}: ${r.error.message}")
+                }
+            } finally {
+                _busy.value = false
+                refreshHome()
+            }
+        }
+    }
+
+    fun uninstallExtension(providerId: String) {
+        viewModelScope.launch {
+            providerManager.uninstall(providerId)
+            message("Extension removed")
             refreshHome()
         }
     }
 
-    fun installScraper(json: String, onDone: (Boolean) -> Unit = {}) {
+    fun setExtensionEnabled(providerId: String, enabled: Boolean) {
         viewModelScope.launch {
-            val r = providerManager.installUniversalScraper(json)
-            onDone(r is StormResult.Ok)
+            providerManager.setEnabled(providerId, enabled)
             refreshHome()
         }
     }
 
-    fun installIptv(name: String, url: String, onDone: (Boolean) -> Unit = {}) {
+    private fun runInstall(kind: String, block: suspend () -> StormResult<ProviderConfig>) {
         viewModelScope.launch {
-            val r = providerManager.installIptvPlaylist(name, url)
-            onDone(r is StormResult.Ok)
-            refreshHome()
+            _busy.value = true
+            try {
+                when (val r = block()) {
+                    is StormResult.Ok -> message("$kind installed: ${r.value.name}")
+                    is StormResult.Err -> message("Failed to install $kind: ${r.error.message}")
+                }
+            } finally {
+                _busy.value = false
+                refreshHome()
+            }
         }
     }
 
-    fun addRepo(url: String, onDone: (Boolean) -> Unit = {}) {
+    // ---------- settings ----------
+
+    fun setTheme(value: String) { viewModelScope.launch { settings.setTheme(value) } }
+    fun setHwdec(value: Boolean) { viewModelScope.launch { settings.setHwdec(value) } }
+    fun setDefaultSpeed(value: Double) { viewModelScope.launch { settings.setDefaultSpeed(value) } }
+    fun setAutoplayNext(value: Boolean) { viewModelScope.launch { settings.setAutoplayNext(value) } }
+    fun setShowAdult(value: Boolean) { viewModelScope.launch { settings.setShowAdult(value) } }
+    fun setSubtitleScale(value: Double) { viewModelScope.launch { settings.setSubtitleScale(value) } }
+
+    fun clearCaches() {
         viewModelScope.launch {
-            runCatching { repoManager.addRepo(url) }
-                .onSuccess { _repos.value = repoManager.repos(); onDone(true) }
-                .onFailure { onDone(false) }
+            providerManager.http.evictCache()
+            runCatching {
+                val loader = getApplication<Application>().imageLoader
+                loader.diskCache?.clear()
+                loader.memoryCache?.clear()
+            }
+            message("Caches cleared")
         }
     }
 
-    fun installPlugin(plugin: com.stormstream.app.data.RepoPlugin) {
-        viewModelScope.launch {
-            repoManager.installPlugin(plugin)
-            refreshHome()
-        }
+    // ---------- helpers ----------
+
+    fun providerName(providerId: String): String =
+        providerManager.get(providerId)?.config?.name ?: providerId
+
+    fun providerTypeLabel(type: ProviderType): String = when (type) {
+        ProviderType.STREMIO -> "Stremio"
+        ProviderType.SCRAPER -> "Scraper"
+        ProviderType.IPTV -> "IPTV"
+        ProviderType.JS -> "JS Plugin"
     }
+
+    /** Hide items from adult extensions unless the user opted in. */
+    private suspend fun List<MediaItem>.filterAdult(): List<MediaItem> {
+        val showAdult = settings.showAdult.first()
+        if (showAdult) return this
+        val adultIds = providerManager.providers.value.values
+            .filter { it.config.adult }
+            .map { it.config.id }
+            .toSet()
+        return filterNot { it.providerId in adultIds }
+    }
+
 }

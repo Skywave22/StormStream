@@ -6,24 +6,21 @@ import com.stormstream.app.core.StormError
 import com.stormstream.app.core.StormResult
 import com.stormstream.app.data.CatalogRef
 import com.stormstream.app.data.Episode
+import com.stormstream.app.data.ExtensionStore
 import com.stormstream.app.data.InstalledExtension
+import com.stormstream.app.data.JsPluginManifest
 import com.stormstream.app.data.MediaItem
 import com.stormstream.app.data.ProviderConfig
 import com.stormstream.app.data.ProviderType
 import com.stormstream.app.data.StreamSource
 import com.stormstream.app.net.StormHttpClient
-import com.stormstream.app.providers.aniyomi.AniyomiProvider
-import com.stormstream.app.providers.cs3.Cs3Provider
 import com.stormstream.app.providers.iptv.IptvProvider
-import com.stormstream.app.providers.manga.MangaProvider
-import com.stormstream.app.providers.nuvio.NuvioProvider
+import com.stormstream.app.providers.js.JsProvider
+import com.stormstream.app.providers.js.slugify
 import com.stormstream.app.providers.scraper.UniversalScraperConfig
 import com.stormstream.app.providers.scraper.UniversalScraperProvider
-import com.stormstream.app.providers.skystream.SkyStreamProvider
-import com.stormstream.app.providers.sora.SoraProvider
-import com.stormstream.app.providers.storm.StormNativeProvider
 import com.stormstream.app.providers.stremio.StremioAddonProvider
-import com.stormstream.app.providers.vega.VegaProvider
+import com.stormstream.app.util.StormJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -32,50 +29,308 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
- * Central registry for every StreamProvider in the app.
+ * Central registry for every [StreamProvider] in the app.
  *
  * Responsibilities:
- *  1. Owns the OkHttp [StormHttpClient] shared by all providers.
- *  2. Tracks installed providers and exposes them as a StateFlow.
- *  3. Routes UI calls (home/search/detail/streams) to every enabled provider
- *     concurrently and merges results.
- *  4. Provides install() / uninstall() hooks for each provider type, delegating
- *     to the per-type adapter/manager (StremioAddonProvider.fromUrl etc.).
+ *  1. Owns the shared [StormHttpClient].
+ *  2. Tracks installed providers and exposes them as a [StateFlow].
+ *  3. Routes UI calls (home/search/detail/streams) to providers and merges results.
+ *  4. Installs / uninstalls / enables / disables extensions and **persists**
+ *     every change to [ExtensionStore] so installs survive restarts.
+ *  5. Restores providers from the store on app start and bootstraps two
+ *     curated sources on first run.
  */
 class ProviderManager private constructor(
     private val context: Context,
     val http: StormHttpClient,
+    private val extensionStore: ExtensionStore,
 ) {
     private val _providers = MutableStateFlow<Map<String, StreamProvider>>(emptyMap())
     val providers: StateFlow<Map<String, StreamProvider>> = _providers.asStateFlow()
 
+    /** providerId → initialization error message (shown in the Extensions UI). */
+    private val _providerErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val providerErrors: StateFlow<Map<String, String>> = _providerErrors.asStateFlow()
+
+    /** providerIds the user has switched off (persisted in the extension record). */
+    private val _disabledIds = MutableStateFlow<Set<String>>(emptySet())
+    val disabledIds: StateFlow<Set<String>> = _disabledIds.asStateFlow()
+
     private val lock = Any()
 
-    // ---- Access ----
+    // ---- access ----
 
     fun enabledProviders(): List<StreamProvider> =
-        _providers.value.values.filter { it.config.enabled }
+        _providers.value.values.filter { it.config.enabled && it.config.id !in _disabledIds.value }
 
     fun get(providerId: String): StreamProvider? = _providers.value[providerId]
 
-    // ---- Registration ----
+    // ---- registration ----
 
-    fun register(provider: StreamProvider) {
+    private fun register(provider: StreamProvider) {
         synchronized(lock) {
             _providers.value = _providers.value + (provider.config.id to provider)
         }
+        _providerErrors.value = _providerErrors.value - provider.config.id
         Log.i(TAG, "Registered provider ${provider.config.id} (${provider.config.type})")
     }
 
-    fun unregister(providerId: String) {
-        synchronized(lock) {
+    private suspend fun unregister(providerId: String) {
+        val p = synchronized(lock) {
+            val removed = _providers.value[providerId]
             _providers.value = _providers.value - providerId
+            removed
+        }
+        runCatching { p?.shutdown() }
+    }
+
+    private fun setError(providerId: String, message: String) {
+        _providerErrors.value = _providerErrors.value + (providerId to message)
+    }
+
+    // ---- install (per type) ----
+
+    suspend fun installStremioAddon(manifestUrl: String): StormResult<ProviderConfig> =
+        withContext(Dispatchers.IO) {
+            try {
+                val addon = StremioAddonProvider.fromUrl(http, manifestUrl.trim())
+                addon.initialize()
+                register(addon)
+                extensionStore.upsertExtension(InstalledExtension(config = addon.config))
+                StormResult.Ok(addon.config)
+            } catch (e: Throwable) {
+                StormResult.Err(StormError.ProviderCrashed("stremio:$manifestUrl", e))
+            }
+        }
+
+    suspend fun installScraperConfig(configJson: String): StormResult<ProviderConfig> =
+        withContext(Dispatchers.IO) {
+            try {
+                val cfg = UniversalScraperConfig.parse(configJson)
+                val provider = UniversalScraperProvider(http, cfg)
+                provider.initialize()
+                register(provider)
+                // Persist the config to disk so it survives restarts.
+                val file = File(pluginDir(), "scraper-${slugify(cfg.name)}.json")
+                file.parentFile?.mkdirs()
+                file.writeText(configJson)
+                extensionStore.upsertExtension(
+                    InstalledExtension(
+                        config = provider.config,
+                        localPath = file.absolutePath,
+                    )
+                )
+                StormResult.Ok(provider.config)
+            } catch (e: Throwable) {
+                StormResult.Err(StormError.Parse("Invalid scraper config: ${e.message}", e))
+            }
+        }
+
+    suspend fun installIptvPlaylist(name: String, url: String): StormResult<ProviderConfig> =
+        withContext(Dispatchers.IO) {
+            try {
+                val provider = IptvProvider(http, name, url.trim())
+                provider.initialize()
+                register(provider)
+                extensionStore.upsertExtension(InstalledExtension(config = provider.config))
+                StormResult.Ok(provider.config)
+            } catch (e: Throwable) {
+                StormResult.Err(StormError.ProviderCrashed("iptv:$name", e))
+            }
+        }
+
+    /**
+     * Install a JavaScript plugin from a URL. The URL may point to:
+     *  - a single `.js` file (StormJS or Vega-style), or
+     *  - a plugin manifest JSON (`storm.plugin.json`) describing one or more
+     *    module files (relative URLs are resolved against the manifest URL).
+     */
+    suspend fun installJsPlugin(
+        url: String,
+        fallbackName: String? = null,
+    ): StormResult<ProviderConfig> = withContext(Dispatchers.IO) {
+        try {
+            val trimmed = url.trim()
+            val text = http.get(trimmed)
+            val looksLikeManifest = trimmed.endsWith(".json", ignoreCase = true) ||
+                text.trimStart().startsWith("{")
+
+            if (looksLikeManifest) {
+                val parsed = StormJson.decodeFromString<JsPluginManifest>(text)
+                installJsPluginFiles(
+                    name = fallbackName ?: parsed.name,
+                    version = parsed.version,
+                    description = parsed.description,
+                    icon = parsed.icon,
+                    adult = parsed.adult,
+                    files = parsed.files.ifEmpty {
+                        if (parsed.main.isNullOrBlank()) emptyMap() else mapOf("main" to parsed.main)
+                    },
+                    baseUrl = trimmed,
+                )
+            } else {
+                installJsPluginFiles(
+                    name = fallbackName ?: "JS Plugin",
+                    files = mapOf("main" to trimmed),
+                    baseUrl = trimmed,
+                    inlineSource = text,
+                )
+            }
+        } catch (e: StormError) {
+            StormResult.Err(e)
+        } catch (e: Throwable) {
+            StormResult.Err(StormError.ProviderCrashed("js:$url", e))
         }
     }
 
-    // ---- Aggregate queries (fan-out to all enabled providers) ----
+    /**
+     * Install a JavaScript plugin from a set of module files.
+     *
+     * @param files    module name → file URL (absolute, or relative to [baseUrl]).
+     * @param baseUrl  base URL used to resolve relative file URLs.
+     * @param inlineSource when set, this source is written as `main.js` without
+     *                     downloading (used when the caller already has the file).
+     */
+    suspend fun installJsPluginFiles(
+        name: String,
+        version: String? = null,
+        description: String? = null,
+        icon: String? = null,
+        adult: Boolean = false,
+        files: Map<String, String>,
+        baseUrl: String,
+        inlineSource: String? = null,
+    ): StormResult<ProviderConfig> = withContext(Dispatchers.IO) {
+        try {
+            val dir = File(pluginDir(), "js-" + slugify(name))
+            dir.mkdirs()
+
+            if (inlineSource != null) {
+                File(dir, "main.js").writeText(inlineSource)
+            } else {
+                for ((module, fileUrl) in files) {
+                    val target = File(dir, "$module.js")
+                    http.download(http.resolve(baseUrl, fileUrl), target)
+                }
+            }
+
+            val manifest = JsPluginManifest(
+                name = name,
+                version = version,
+                description = description,
+                icon = icon,
+                adult = adult,
+                main = "main",
+            )
+            File(dir, "manifest.json").writeText(StormJson.encodeToString(manifest))
+
+            val provider = JsProvider.fromDir(context, http, dir, name)
+            provider.initialize()
+            register(provider)
+            extensionStore.upsertExtension(JsProvider.extensionRecord(provider))
+            StormResult.Ok(provider.config)
+        } catch (e: StormError) {
+            StormResult.Err(e)
+        } catch (e: Throwable) {
+            StormResult.Err(StormError.ProviderCrashed("js:$name", e))
+        }
+    }
+
+    // ---- uninstall / enable ----
+
+    suspend fun uninstall(providerId: String) {
+        val ext = extensionStore.extensionsSnapshot().firstOrNull { it.config.id == providerId }
+        unregister(providerId)
+        extensionStore.removeExtension(providerId)
+        if (ext?.localPath != null) {
+            runCatching {
+                val f = File(ext.localPath)
+                if (f.isDirectory) f.deleteRecursively() else f.delete()
+            }
+        }
+    }
+
+    suspend fun setEnabled(providerId: String, enabled: Boolean) {
+        _disabledIds.value =
+            if (enabled) _disabledIds.value - providerId
+            else _disabledIds.value + providerId
+        // Persist the toggle in the extension record.
+        val ext = extensionStore.extensionsSnapshot().firstOrNull { it.config.id == providerId }
+        if (ext != null) {
+            extensionStore.upsertExtension(ext.copy(config = ext.config.copy(enabled = enabled)))
+        }
+    }
+
+    // ---- restore / bootstrap ----
+
+    /** Re-register every persisted extension. Called once on app start. */
+    suspend fun restore() {
+        val extensions = extensionStore.extensionsSnapshot()
+        val disabled = extensions.filter { !it.config.enabled }.map { it.config.id }.toSet()
+        _disabledIds.value = disabled
+        extensions.forEach { ext ->
+            val r = restoreOne(ext)
+            if (r is StormResult.Err) {
+                setError(ext.config.id, r.error.message)
+                Log.w(TAG, "Failed to restore ${ext.config.id}: ${r.error.message}")
+            }
+        }
+    }
+
+    private suspend fun restoreOne(ext: InstalledExtension): StormResult<ProviderConfig> =
+        withContext(Dispatchers.IO) {
+            try {
+                when (ext.config.type) {
+                    ProviderType.STREMIO -> {
+                        val url = ext.config.sourceUrl
+                            ?: return@withContext StormResult.Err(StormError.Unsupported("Missing addon URL"))
+                        installStremioAddon(url)
+                    }
+                    ProviderType.SCRAPER -> {
+                        val json = ext.localPath?.let {
+                            runCatching { File(it).readText() }.getOrNull()
+                        } ?: return@withContext StormResult.Err(
+                            StormError.Unsupported("Missing scraper config file")
+                        )
+                        installScraperConfig(json)
+                    }
+                    ProviderType.IPTV -> {
+                        val url = ext.config.sourceUrl
+                            ?: return@withContext StormResult.Err(StormError.Unsupported("Missing playlist URL"))
+                        installIptvPlaylist(ext.config.name, url)
+                    }
+                    ProviderType.JS -> {
+                        val dir = ext.localPath?.let(::File)
+                            ?: return@withContext StormResult.Err(
+                                StormError.Unsupported("Missing plugin directory")
+                            )
+                        if (!dir.exists()) {
+                            return@withContext StormResult.Err(
+                                StormError.Unsupported("Plugin files were deleted")
+                            )
+                        }
+                        val provider = JsProvider.fromDir(context, http, dir, ext.config.name)
+                        provider.initialize()
+                        register(provider)
+                        StormResult.Ok(provider.config)
+                    }
+                }
+            } catch (e: Throwable) {
+                StormResult.Err(StormError.ProviderCrashed(ext.config.id, e))
+            }
+        }
+
+    /** Install two curated sources on first run so Home is never empty. */
+    suspend fun bootstrapDefaultsIfNeeded() {
+        if (extensionStore.extensionsSnapshot().isNotEmpty()) return
+        installStremioAddon("https://v3-cinemeta.strem.io/manifest.json")
+        installIptvPlaylist("IPTV Demo", "https://iptv-org.github.io/iptv/index.m3u")
+    }
+
+    // ---- aggregate queries (fan-out to all enabled providers) ----
 
     suspend fun allHomeCatalogs(): List<CatalogRef> = coroutineScope {
         enabledProviders().map { p ->
@@ -130,10 +385,7 @@ class ProviderManager private constructor(
             }
         }
 
-    suspend fun getStreams(
-        item: MediaItem,
-        episode: Episode?
-    ): StormResult<List<StreamSource>> =
+    suspend fun getStreams(item: MediaItem, episode: Episode?): StormResult<List<StreamSource>> =
         withContext(Dispatchers.IO) {
             val p = get(item.providerId)
                 ?: return@withContext StormResult.Err(StormError.NotInstalled(item.providerId))
@@ -144,81 +396,9 @@ class ProviderManager private constructor(
             }
         }
 
-    // ---- Install helpers (per provider type) ----
+    // ---- helpers ----
 
-    suspend fun installStremioAddon(manifestUrl: String): StormResult<Unit> =
-        withContext(Dispatchers.IO) {
-            try {
-                val addon = StremioAddonProvider.fromUrl(http, manifestUrl)
-                addon.initialize()
-                register(addon)
-                StormResult.Ok(Unit)
-            } catch (e: Throwable) {
-                StormResult.Err(StormError.ProviderCrashed("stremio:$manifestUrl", e))
-            }
-        }
-
-    suspend fun installUniversalScraper(configJson: String): StormResult<Unit> =
-        withContext(Dispatchers.IO) {
-            try {
-                val cfg = UniversalScraperConfig.parse(configJson)
-                val p = UniversalScraperProvider(http, cfg)
-                p.initialize()
-                register(p)
-                StormResult.Ok(Unit)
-            } catch (e: Throwable) {
-                StormResult.Err(StormError.Parse("Invalid scraper JSON: ${e.message}", e))
-            }
-        }
-
-    suspend fun installIptvPlaylist(name: String, url: String): StormResult<Unit> =
-        withContext(Dispatchers.IO) {
-            try {
-                val p = IptvProvider(http, name, url)
-                p.initialize()
-                register(p)
-                StormResult.Ok(Unit)
-            } catch (e: Throwable) {
-                StormResult.Err(StormError.ProviderCrashed("iptv:$name", e))
-            }
-        }
-
-    /** Register an adapter scaffold for a provider type we don't run natively
-     *  in the demo build (cs3, vega, skystream, sora, aniyomi, nuvio, manga,
-     *  storm native). Each scaffold exposes install() that stashes the config
-     *  and returns a descriptive "not yet available in this build" stream list
-     *  — the UI can still show the provider as installed and list its items
-     *  after catalog refresh; play just shows a friendly message.
-     */
-    fun installScaffold(type: ProviderType, cfg: ProviderConfig) {
-        val p: StreamProvider = when (type) {
-            ProviderType.CS3 -> Cs3Provider(cfg)
-            ProviderType.VEGA -> VegaProvider(cfg)
-            ProviderType.SKYSTREAM -> SkyStreamProvider(cfg)
-            ProviderType.SORA -> SoraProvider(cfg)
-            ProviderType.ANIYOMI -> AniyomiProvider(cfg)
-            ProviderType.NUVIO -> NuvioProvider(cfg)
-            ProviderType.MANGA -> MangaProvider(cfg)
-            ProviderType.STORM -> StormNativeProvider(cfg)
-            // These three are handled by their real install methods above.
-            ProviderType.STREMIO,
-            ProviderType.UNIVERSAL_SCRAPER,
-            ProviderType.IPTV -> return
-        }
-        register(p)
-    }
-
-    /** Bootstrap a few demo/curated sources on first launch so Home is not empty. */
-    suspend fun bootstrapDefaults() {
-        if (_providers.value.isNotEmpty()) return
-        // Stremio's public "Cinemeta" catalog addon is always-on as a seed.
-        installStremioAddon("https://v3-cinemeta.strem.io/manifest.json")
-        // A demo IPTV playlist (public, free, legal demo streams).
-        installIptvPlaylist(
-            "IPTV Demo",
-            "https://iptv-org.github.io/iptv/index.m3u"
-        )
-    }
+    private fun pluginDir(): File = File(context.filesDir, "plugins")
 
     companion object {
         private const val TAG = "StormProviderMgr"
@@ -230,26 +410,11 @@ class ProviderManager private constructor(
             instance ?: synchronized(this) {
                 instance ?: ProviderManager(
                     context.applicationContext,
-                    StormHttpClient(context.applicationContext.cacheDir)
+                    StormHttpClient(File(context.applicationContext.cacheDir, "storm")),
+                    ExtensionStore.get(context.applicationContext),
                 ).also { instance = it }
             }
 
-        /** Access to the shared HTTP client for plugin managers/repo loaders. */
         fun http(context: Context): StormHttpClient = get(context).http
-    }
-
-    /** Restore from persisted extension records (called on app start). */
-    suspend fun restore(extensions: List<InstalledExtension>) {
-        extensions.forEach { ext ->
-            when (ext.config.type) {
-                ProviderType.STREMIO -> installStremioAddon(ext.config.sourceUrl ?: return@forEach)
-                ProviderType.UNIVERSAL_SCRAPER -> {
-                    val json = ext.localPath?.let { runCatching { java.io.File(it).readText() }.getOrNull() }
-                    if (json != null) installUniversalScraper(json)
-                }
-                ProviderType.IPTV -> installIptvPlaylist(ext.config.name, ext.config.sourceUrl ?: return@forEach)
-                else -> installScaffold(ext.config.type, ext.config)
-            }
-        }
     }
 }

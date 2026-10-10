@@ -1,21 +1,60 @@
 package com.stormstream.app.ui.screens
 
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
+import android.os.Build
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.stormstream.app.BuildConfig
+import com.stormstream.app.data.AppViewModel
+import com.stormstream.app.data.THEME_DARK
+import com.stormstream.app.data.THEME_LIGHT
+import com.stormstream.app.data.THEME_SYSTEM
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onRefresh: () -> Unit = {},
+    viewModel: AppViewModel = viewModel(),
 ) {
+    val theme by viewModel.settings.theme.collectAsState(initial = THEME_DARK)
+    val hwdec by viewModel.settings.hwdec.collectAsState(initial = true)
+    val speed by viewModel.settings.defaultSpeed.collectAsState(initial = 1.0)
+    val autoplay by viewModel.settings.autoplayNext.collectAsState(initial = true)
+    val showAdult by viewModel.settings.showAdult.collectAsState(initial = false)
+    val subScale by viewModel.settings.subtitleScale.collectAsState(initial = 1.0)
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -24,68 +63,223 @@ fun SettingsScreen(
                     containerColor = MaterialTheme.colorScheme.background,
                 ),
             )
-        }
+        },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // ---------- appearance ----------
             item {
-                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Row {
-                            Icon(Icons.Default.Bolt, contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text("StormStream", style = MaterialTheme.typography.titleMedium)
-                                Text("v0.1.0 · universal provider engine",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SettingsSection(title = "Appearance") {
+                    Column(Modifier.selectableGroup()) {
+                        ThemeRow("Dark", theme == THEME_DARK) {
+                            viewModel.setTheme(THEME_DARK)
+                        }
+                        ThemeRow("Light", theme == THEME_LIGHT) {
+                            viewModel.setTheme(THEME_LIGHT)
+                        }
+                        ThemeRow("System", theme == THEME_SYSTEM) {
+                            viewModel.setTheme(THEME_SYSTEM)
+                        }
+                    }
+                }
+            }
+
+            // ---------- player ----------
+            item {
+                SettingsSection(title = "Player (libmpv)") {
+                    SwitchRow(
+                        title = "Hardware decoding",
+                        subtitle = "Let libmpv use the GPU decoder (recommended)",
+                        checked = hwdec,
+                        onCheckedChange = { viewModel.setHwdec(it) },
+                    )
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Text(
+                            text = "Default playback speed: ${"%.2f".format(speed).removeSuffix(".00")}x",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Slider(
+                            value = speed.toFloat(),
+                            onValueChange = { viewModel.setDefaultSpeed(it.toDouble()) },
+                            valueRange = 0.5f..2f,
+                            steps = 5,
+                        )
+                    }
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Text(
+                            text = "Subtitle size: ${"%.0f".format(subScale * 100)}%",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Slider(
+                            value = subScale.toFloat(),
+                            onValueChange = { viewModel.setSubtitleScale(it.toDouble()) },
+                            valueRange = 0.5f..2f,
+                            steps = 5,
+                        )
+                    }
+                    SwitchRow(
+                        title = "Auto-play next episode",
+                        subtitle = "Continue to the next episode when one finishes",
+                        checked = autoplay,
+                        onCheckedChange = { viewModel.setAutoplayNext(it) },
+                    )
+                }
+            }
+
+            // ---------- content ----------
+            item {
+                SettingsSection(title = "Content") {
+                    SwitchRow(
+                        title = "Show adult extensions",
+                        subtitle = "Include NSFW sources in home and search",
+                        checked = showAdult,
+                        onCheckedChange = { viewModel.setShowAdult(it) },
+                    )
+                }
+            }
+
+            // ---------- data ----------
+            item {
+                SettingsSection(title = "Data") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = { viewModel.clearCaches() },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Clear caches")
+                        }
+                    }
+                }
+            }
+
+            // ---------- about ----------
+            item {
+                SettingsSection(title = "About") {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                androidx.compose.material3.Icon(
+                                    imageVector = Icons.Default.Bolt,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        "StormStream",
+                                        style = MaterialTheme.typography.titleMedium,
+                                    )
+                                    Text(
+                                        "v${BuildConfig.VERSION_NAME} · player: internal libmpv",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
+                            Spacer(Modifier.height(8.dp))
+                            HorizontalDivider()
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "One player (libmpv, bundled in the app), every source: " +
+                                    "Stremio addons, universal scrapers, IPTV playlists and " +
+                                    "JavaScript plugins running in the built-in QuickJS engine.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "Android ${Build.VERSION.RELEASE} · SDK ${Build.VERSION.SDK_INT}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
-                }
-            }
-            item {
-                Text("Provider systems supported",
-                    style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(4.dp))
-                val providers = listOf(
-                    "Stremio addons (manifest.json, catalogs/meta/streams/subtitles)" to "working",
-                    "Universal HTML/JSON scrapers (CSS selectors, no-code config)" to "working",
-                    "IPTV / M3U playlists (grouped channel catalogs)" to "working",
-                    "CloudStream .cs3 plugins" to "adapter scaffold",
-                    "Vega providers (CommonJS modules)" to "adapter scaffold",
-                    "SkyStream extensions" to "adapter scaffold",
-                    "Sora extensions" to "adapter scaffold",
-                    "Aniyomi extensions" to "adapter scaffold",
-                    "Nuvio JS/QuickJS scrapers" to "adapter scaffold",
-                    "Manga sources" to "adapter scaffold",
-                    "Native Storm (.storm) extensions" to "adapter scaffold",
-                )
-                providers.forEach { (name, status) ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(name, style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f))
-                        Surface(color = if (status == "working")
-                            MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                            shape = MaterialTheme.shapes.small) {
-                            Text(status,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-            }
-            item {
-                Button(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) {
-                    Text("Refresh home")
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsSection(title: String, content: @Composable () -> Unit) {
+    Column {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+        ) {
+            Column {
+                content()
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeRow(
+    label: String,
+    selected: Boolean,
+    onSelect: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(
+                selected = selected,
+                onClick = onSelect,
+                role = Role.RadioButton,
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onSelect)
+        Spacer(Modifier.width(12.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+private fun SwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

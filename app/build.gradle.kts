@@ -1,5 +1,3 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -15,8 +13,8 @@ android {
         applicationId = "com.stormstream.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -33,7 +31,7 @@ android {
 
     kotlin {
         compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_17)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
 
@@ -60,7 +58,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material)
     implementation(libs.androidx.compose.material.icons)
     implementation(libs.androidx.navigation.compose)
 
@@ -70,13 +67,14 @@ dependencies {
     implementation(libs.jsoup)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.datastore.preferences)
 
-    implementation(libs.media3.exoplayer)
-    implementation(libs.media3.ui)
-    implementation(libs.media3.common)
-    implementation(libs.media3.dash)
-    implementation(libs.media3.hls)
-    implementation(libs.media3.session)
+    // The one and only player: internal libmpv (bundled in the AAR).
+    implementation(libs.mpv.android.lib)
+    // In-app JavaScript runtime for extension plugins (QuickJS).
+    implementation(libs.quickjs.kt)
+    // HTML parsing (jsoup-compatible API) exposed to JS plugins.
+    implementation(libs.ksoup)
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

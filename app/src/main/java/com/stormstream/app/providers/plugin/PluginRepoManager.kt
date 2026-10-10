@@ -1,8 +1,9 @@
 package com.stormstream.app.providers.plugin
 
 import android.util.Log
-import com.stormstream.app.data.MediaType
-import com.stormstream.app.data.ProviderConfig
+import com.stormstream.app.core.StormError
+import com.stormstream.app.core.StormResult
+import com.stormstream.app.data.ExtensionStore
 import com.stormstream.app.data.ProviderType
 import com.stormstream.app.data.RepoIndex
 import com.stormstream.app.data.RepoPlugin
@@ -10,101 +11,145 @@ import com.stormstream.app.net.StormHttpClient
 import com.stormstream.app.providers.ProviderManager
 import com.stormstream.app.util.StormJson
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
 /**
- * Loads third-party extension repos (the same idea as Hikari's "Add repo" flow).
+ * Loads third-party extension repositories and installs plugins from them.
  *
- * A repo URL points at a repo.json of one of three shapes:
- *   1. Hiki/Storm/Vega style:
- *      { "name": "...", "plugins": [ { "name", "url", "version", "tvTypes", "providerType" } ] }
+ * A repo URL points at a repo.json of one of these shapes:
+ *   1. Hiki/Vega/SkyStream style:
+ *      { "name": "...", "plugins": [ { "name", "url", "version", "tvTypes",
+ *        "providerType", "files": { "<module>": "<url>" } } ] }
  *   2. CloudStream style:
- *      { "name": "...", "manifestVersion": 1, "pluginLists": [ "<url to plugins.json>" ] }
- *      where plugins.json is itself a list of plugin objects.
- *   3. Plain github.com/owner/repo shorthand — we rewrite it to the raw URL.
+ *      { "name": "...", "pluginLists": [ "<url to plugins.json>" ] }
+ *   3. A plain JSON array of plugin objects.
+ *   4. A `github.com/owner/repo` shorthand — rewritten to the repo's
+ *      `builds/repo.json` on raw.githubusercontent.com.
  *
- * Once fetched, plugins are shown to the user and installed on demand; the
- * per-type runtime downloads the file and loads it (JS, dex, json config, etc).
+ * Loaded repos are kept in memory (with per-repo loading/error state) and the
+ * list of added repo URLs is persisted in [ExtensionStore].
  */
 class PluginRepoManager(
     private val http: StormHttpClient,
     private val providerManager: ProviderManager,
+    private val extensionStore: ExtensionStore,
 ) {
 
-    private val addedRepos = mutableMapOf<String, RepoIndex>()
+    sealed interface RepoState {
+        data object Loading : RepoState
+        data class Ok(val index: RepoIndex) : RepoState
+        data class Err(val message: String) : RepoState
+    }
 
-    fun repos(): Map<String, RepoIndex> = addedRepos.toMap()
+    private val _repoStates = MutableStateFlow<Map<String, RepoState>>(emptyMap())
+    val repoStates: StateFlow<Map<String, RepoState>> = _repoStates.asStateFlow()
 
-    suspend fun addRepo(url: String): RepoIndex = withContext(Dispatchers.IO) {
-        val normalized = normalizeUrl(url)
-        val body = http.get(normalized)
-        var idx = StormJson.decodeFromString(RepoIndex.serializer(), body)
-        // If it's a CloudStream-style manifest, follow pluginLists.
-        if (idx.pluginLists.isNotEmpty() && idx.plugins.isEmpty()) {
+    /** Persisted list of added repo URLs. */
+    val repoEntries = extensionStore.repos
+
+    /** Load (or reload) every persisted repo. Called on app start. */
+    suspend fun loadAll() {
+        extensionStore.reposSnapshot().forEach { entry ->
+            refreshRepo(entry.url)
+        }
+    }
+
+    /** Add a repo URL, persist it, and load it. */
+    suspend fun addRepo(rawUrl: String): RepoIndex = withContext(Dispatchers.IO) {
+        val url = normalizeUrl(rawUrl)
+        extensionStore.addRepo(url)
+        loadRepo(url)
+    }
+
+    suspend fun refreshRepo(url: String) = withContext(Dispatchers.IO) {
+        loadRepo(url)
+    }
+
+    suspend fun removeRepo(url: String) {
+        extensionStore.removeRepo(url)
+        _repoStates.value = _repoStates.value - url
+    }
+
+    private suspend fun loadRepo(url: String): RepoIndex {
+        _repoStates.value = _repoStates.value + (url to RepoState.Loading)
+        return try {
+            val index = fetchIndex(url)
+            _repoStates.value = _repoStates.value + (url to RepoState.Ok(index))
+            index
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to load repo $url", e)
+            _repoStates.value = _repoStates.value + (url to RepoState.Err(e.message ?: "Failed to load"))
+            throw e
+        }
+    }
+
+    private suspend fun fetchIndex(url: String): RepoIndex = withContext(Dispatchers.IO) {
+        val body = http.get(url)
+        // Plain array of plugins?
+        if (body.trimStart().startsWith("[")) {
+            val plugins = StormJson.decodeFromString<List<RepoPlugin>>(body)
+            return@withContext RepoIndex(name = url, plugins = plugins)
+        }
+        var idx = StormJson.decodeFromString<RepoIndex>(body)
+        // CloudStream-style manifest: follow pluginLists.
+        if (idx.pluginLists.isNotEmpty()) {
             val all = mutableListOf<RepoPlugin>()
             idx.pluginLists.forEach { listUrl ->
-                val listBody = runCatching { http.get(listUrl) }.getOrNull()
-                if (listBody != null) {
-                    val arr = StormJson.decodeFromString<List<RepoPlugin>>(listBody)
-                    all += arr
-                }
+                runCatching {
+                    val listBody = http.get(http.resolve(url, listUrl))
+                    all += StormJson.decodeFromString<List<RepoPlugin>>(listBody)
+                }.onFailure { Log.w(TAG, "Failed to load plugin list $listUrl", it) }
             }
             idx = idx.copy(plugins = all)
         }
-        addedRepos[normalized] = idx
         idx
     }
 
-    suspend fun installPlugin(plugin: RepoPlugin): Boolean = withContext(Dispatchers.IO) {
-        val type = plugin.providerType?.let {
-            runCatching { ProviderType.valueOf(it.uppercase()) }.getOrNull()
-        } ?: ProviderType.STORM
+    /**
+     * Install a plugin from a repo. Dispatches on the plugin's providerType:
+     * Stremio addons, scraper configs, IPTV playlists and JS plugins are all
+     * really installed (downloaded, initialized, persisted).
+     */
+    suspend fun installPlugin(plugin: RepoPlugin): StormResult<Unit> = withContext(Dispatchers.IO) {
+        val type = ProviderType.fromRepoType(plugin.providerType)
         when (type) {
-            // For demo, we register scaffold entries. Real code would download
-            // the plugin file to cache dir and hand off to the per-type runtime.
-            ProviderType.STREMIO -> {
-                providerManager.installStremioAddon(plugin.url)
-                true
+            ProviderType.STREMIO ->
+                providerManager.installStremioAddon(plugin.url).map { }
+            ProviderType.SCRAPER -> {
+                val json = runCatching { http.get(plugin.url) }.getOrElse {
+                    return@withContext StormResult.Err(
+                        StormError.Network("Failed to download scraper config: ${it.message}", it)
+                    )
+                }
+                providerManager.installScraperConfig(json).map { }
             }
-            ProviderType.UNIVERSAL_SCRAPER -> {
-                val cfgJson = runCatching { http.get(plugin.url) }.getOrNull()
-                if (cfgJson != null) { providerManager.installUniversalScraper(cfgJson); true }
-                else false
-            }
-            ProviderType.IPTV -> {
-                providerManager.installIptvPlaylist(plugin.name, plugin.url)
-                true
-            }
-            else -> {
-                val types = plugin.tvTypes.mapNotNull { t ->
-                    when (t) {
-                        "movie" -> MediaType.MOVIE
-                        "tv", "series" -> MediaType.SERIES
-                        "anime" -> MediaType.ANIME
-                        "manga" -> MediaType.MANGA
-                        else -> null
-                    }
-                }.toSet().ifEmpty { setOf(MediaType.MOVIE) }
-                val cfg = ProviderConfig(
-                    id = "${type.key}:${plugin.name.lowercase().replace(Regex("[^a-z0-9]+"), "-")}",
-                    name = plugin.name,
-                    type = type,
-                    icon = plugin.icon,
-                    baseUrl = plugin.url,
-                    version = plugin.version.toString(),
-                    supportedMediaTypes = types,
-                )
-                providerManager.installScaffold(type, cfg)
-                Log.i(TAG, "Installed scaffold for ${plugin.name} (type=$type)")
-                true
-            }
+            ProviderType.IPTV ->
+                providerManager.installIptvPlaylist(plugin.name, plugin.url).map { }
+            ProviderType.JS ->
+                if (plugin.files.isNotEmpty()) {
+                    // Multi-file JS plugin: relative file URLs resolve against
+                    // the plugin's own URL.
+                    val base = plugin.url.substringBeforeLast('/')
+                    providerManager.installJsPluginFiles(
+                        name = plugin.name,
+                        version = plugin.version.toString(),
+                        description = plugin.description,
+                        icon = plugin.icon,
+                        files = plugin.files,
+                        baseUrl = base,
+                    ).map { }
+                } else {
+                    providerManager.installJsPlugin(plugin.url, fallbackName = plugin.name).map { }
+                }
         }
     }
 
     private fun normalizeUrl(raw: String): String {
         val t = raw.trim()
         if (t.startsWith("http")) return t
-        // github.com/owner/repo short form → raw build repo.json.
         val gh = Regex("""github\.com/([^/]+)/([^/]+)/?""").find(t)
         if (gh != null) {
             val (owner, repo) = gh.destructured

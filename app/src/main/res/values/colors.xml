@@ -3,4 +3,5 @@
     <color name="storm_primary">#FF1E3A8A</color>
     <color name="storm_primary_dark">#FF0F172A</color>
     <color name="storm_accent">#FF60A5FA</color>
+    <color name="storm_rating">#FFFBBF24</color>
 </resources>

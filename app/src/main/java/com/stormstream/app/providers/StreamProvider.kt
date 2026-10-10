@@ -11,10 +11,9 @@ import com.stormstream.app.data.StreamSource
  * The single contract every provider backend in StormStream must satisfy.
  *
  * Provider-specific adapters (StremioAddonProvider, UniversalScraperProvider,
- * Cs3Provider, VegaProvider, SkyStreamProvider, SoraProvider, AniyomiProvider,
- * NuvioProvider, IptvProvider, MangaProvider, StormNativeProvider) implement
- * this interface. The UI, database and player talk ONLY to this interface —
- * they never know which backend a MediaItem came from.
+ * IptvProvider, JsProvider) implement this interface. The UI, persistence and
+ * player talk ONLY to this interface — they never know which backend a
+ * MediaItem came from.
  *
  * All methods are suspending and may throw. [ProviderManager] catches and wraps
  * everything into [StormResult] so callers get uniform error handling.

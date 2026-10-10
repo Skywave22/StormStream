@@ -5,9 +5,9 @@ import kotlinx.serialization.Serializable
 /**
  * Shared data models for StormStream.
  *
- * Every provider — Stremio, universal scrapers, CloudStream .cs3, Vega,
- * SkyStream, Sora, Aniyomi, Nuvio, IPTV, Manga, Storm native — is adapted into
- * these shapes so the rest of the UI/player only sees one vocabulary.
+ * Every provider — Stremio addons, universal scrapers, IPTV playlists and
+ * JavaScript plugins — is adapted into these shapes so the rest of the app
+ * (UI, persistence, player) only ever sees one vocabulary.
  */
 
 enum class MediaType {
@@ -24,13 +24,13 @@ data class ProviderConfig(
     val id: String,
     /** Human-readable name shown in UI. */
     val name: String,
-    /** What kind of backend this provider uses (stremio, cs3, vega, ...). */
+    /** What kind of backend this provider uses. */
     val type: ProviderType,
     /** Optional icon URL. */
     val icon: String? = null,
-    /** Base URL for remote addons/plugins; null for local-on-device plugins. */
+    /** Base URL for remote addons/plugins; null for local-only plugins. */
     val baseUrl: String? = null,
-    /** The source URL from which the extension was installed (repo JSON, addon URL, .cs3 file, etc). */
+    /** The source URL from which the extension was installed. */
     val sourceUrl: String? = null,
     /** Installed version string, if the extension reports one. */
     val version: String? = null,
@@ -42,19 +42,40 @@ data class ProviderConfig(
     val adult: Boolean = false,
 )
 
+/**
+ * The extension systems StormStream can actually install and run:
+ *  - [STREMIO]  — any Stremio v3 addon (manifest.json URL)
+ *  - [SCRAPER]  — universal no-code HTML/JSON scraper configs
+ *  - [IPTV]     — M3U/M3U8 playlists
+ *  - [JS]       — JavaScript plugins running in the built-in QuickJS runtime
+ *                 (StormJS API, with a compatibility bridge for JSON-based
+ *                 Vega-style providers)
+ */
 @Serializable
 enum class ProviderType(val key: String) {
     STREMIO("stremio"),
-    UNIVERSAL_SCRAPER("scraper"),
-    CS3("cs3"),           // CloudStream .cs3
-    VEGA("vega"),         // vega-providers CommonJS
-    SKYSTREAM("skystream"),
-    SORA("sora"),
-    ANIYOMI("aniyomi"),
-    NUVIO("nuvio"),       // JS rule scrapers (QuickJS)
-    IPTV("iptv"),         // M3U/M3U8 playlists + Xtream Codes
-    MANGA("manga"),
-    STORM("storm");       // Native Kotlin .storm extensions
+    SCRAPER("scraper"),
+    IPTV("iptv"),
+    JS("js");
+
+    companion object {
+        fun fromKey(key: String?): ProviderType? =
+            key?.lowercase()?.let { k -> entries.firstOrNull { it.key == k } }
+
+        /**
+         * Map an extension-repo `providerType` string (which may name any
+         * ecosystem: vega, nuvio, sora, skystream, cloudstream, ...) onto a
+         * type StormStream can install. Ecosystems we run through the JS
+         * runtime map to [JS]; genuinely unknown values also map to [JS] and
+         * fail with a clear error at load time if the file is not JavaScript.
+         */
+        fun fromRepoType(raw: String?): ProviderType = when (raw?.lowercase()?.trim()) {
+            "stremio", "stremio-addon", "stremio_addon", "addon" -> STREMIO
+            "scraper", "universal", "universal_scraper", "html", "json" -> SCRAPER
+            "iptv", "m3u", "m3u8", "playlist" -> IPTV
+            else -> JS
+        }
+    }
 }
 
 @Serializable
@@ -63,7 +84,7 @@ data class CatalogRef(
     val catalogId: String,
     val name: String,
     val mediaType: MediaType,
-    /** Extra JSON-encoded metadata used by the provider (e.g. Stremio's catalog types). */
+    /** Extra metadata used by the provider (opaque to the UI). */
     val extra: Map<String, String> = emptyMap(),
 )
 
@@ -82,7 +103,7 @@ data class MediaItem(
     val genres: List<String> = emptyList(),
     /** Optional internal URL/link the provider needs to fetch meta/streams. */
     val internalUrl: String? = null,
-    /** For series/anime: season/episode count known ahead of time, if any. */
+    /** For series/anime: season count known ahead of time, if any. */
     val totalSeasons: Int? = null,
     /** For IPTV only: channel group. */
     val group: String? = null,
@@ -124,10 +145,10 @@ data class StreamSource(
 
 @Serializable
 data class RepoIndex(
-    val name: String,
+    val name: String = "",
     val description: String? = null,
     val plugins: List<RepoPlugin> = emptyList(),
-    /** For CloudStream compat repos. */
+    /** For CloudStream-compat repos: URLs of plugin list documents. */
     val pluginLists: List<String> = emptyList(),
 )
 
@@ -139,13 +160,47 @@ data class RepoPlugin(
     val tvTypes: List<String> = emptyList(),
     val icon: String? = null,
     val providerType: String? = null,
+    val description: String? = null,
+    /**
+     * For multi-file JavaScript plugins (e.g. Vega-style providers split into
+     * catalog/posts/meta/stream modules): module name → file URL.
+     */
+    val files: Map<String, String> = emptyMap(),
 )
 
-/** Extension installed on the device: a record in Room/DataStore. */
+/** An extension installed on the device — persisted in DataStore. */
 @Serializable
 data class InstalledExtension(
     val config: ProviderConfig,
-    /** Local path to the file (plugin JAR/JS/JSON), null for remote-only addons like Stremio. */
+    /** Local directory/file holding downloaded plugin data, null for remote-only addons. */
     val localPath: String? = null,
     val installedAt: Long = System.currentTimeMillis(),
+)
+
+/** A repository the user added, persisted in DataStore. */
+@Serializable
+data class RepoEntry(
+    val url: String,
+    val addedAt: Long = System.currentTimeMillis(),
+)
+
+/**
+ * Manifest for a JavaScript plugin (`storm.plugin.json`). A plugin may also be
+ * a single `.js` file, in which case the manifest is synthesized from the
+ * plugin's own exports.
+ */
+@Serializable
+data class JsPluginManifest(
+    val name: String,
+    val version: String? = null,
+    val description: String? = null,
+    val icon: String? = null,
+    /** "storm" (native StormJS API) or "vega" (compat bridge). Auto-detected when null. */
+    val dialect: String? = null,
+    val adult: Boolean = false,
+    /** Entry file name when the plugin has several modules. */
+    val main: String? = null,
+    /** module name → file URL, for multi-file plugins. */
+    val files: Map<String, String> = emptyMap(),
+    val types: List<String> = emptyList(),
 )

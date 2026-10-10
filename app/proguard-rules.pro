@@ -5,13 +5,20 @@
 -keepclassmembers class kotlinx.serialization.json.** { *** Companion; }
 -keepclasseswithmembers class kotlinx.serialization.json.** { kotlinx.serialization.KSerializer serializer(...); }
 
-# Keep data models for plugin IPC reflection (used by JSON de/serializers)
+# Keep data models (used by JSON de/serializers for extensions, repos, plugins)
 -keep class com.stormstream.app.data.** { *; }
 -keep class com.stormstream.app.providers.** { *; }
 
-# OkHttp
+# OkHttp / Okio
 -dontwarn okhttp3.**
 -dontwarn okio.**
 
-# JSoup
+# JSoup / Ksoup
 -keep class org.jsoup.** { *; }
+-keep class com.fleeksoft.ksoup.** { *; }
+
+# libmpv wrapper (JNI)
+-keep class is.xyz.mpv.** { *; }
+
+# QuickJS wrapper (JNI + native bindings)
+-keep class com.dokar.quickjs.** { *; }
