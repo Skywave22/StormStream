@@ -12,7 +12,7 @@ dark-first UI, and **exactly one player: libmpv, bundled inside the app**.
 
 | Feature | How it works |
 |---------|--------------|
-| **Player** | Internal libmpv (`MpvPlayerController` + `BaseMPVView`). Gestures (tap/double-tap/drag seek/brightness/volume), subtitle & audio track selection, speed control, background playback with a media notification (`PlaybackService`). |
+| **Player** | Internal libmpv (`MpvPlayerController` + `StormMpvView`/`BaseMPVView`). Gestures (tap/double-tap/drag seek/brightness/volume), subtitle & audio track selection, speed control, background playback with a media notification (`PlaybackService`). |
 | **Stremio addons** | Real v3 addon protocol: manifest → catalogs → meta → streams → subtitles (`StremioAddonProvider`). Install by manifest URL or `stremio://` deep link. |
 | **Universal scrapers** | No-code JSON configs (CSS selectors for HTML, dotted paths for JSON) — paste a config, get a full source (`UniversalScraperProvider`). |
 | **IPTV / M3U** | M3U/M3U8 playlists become group catalogs of live channels (`IptvProvider`). |
@@ -34,6 +34,8 @@ app/src/main/java/com/stormstream/app/
 ├── data/                      Models, ExtensionStore, SettingsStore, AppViewModel
 ├── net/StormHttpClient.kt     shared OkHttp client (cache, UA, download)
 ├── player/
+│   ├── StormMpvView.kt        the libmpv video surface (BaseMPVView subclass, owns
+│   │                          the single MPV instance via initialize())
 │   ├── MpvPlayerController.kt THE player: one internal libmpv instance, state flows,
 │   │                          track selection, headers/subs, eof events
 │   └── PlaybackService.kt     foreground service + media notification + wake lock
