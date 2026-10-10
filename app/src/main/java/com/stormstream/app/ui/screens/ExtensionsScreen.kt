@@ -69,7 +69,7 @@ fun ExtensionsScreen(
     val extensions by viewModel.installedExtensions.collectAsState()
     val errors by viewModel.providerErrors.collectAsState()
     val repoStates by viewModel.repoStates.collectAsState()
-    val repoEntries by viewModel.repoEntries.collectAsState()
+    val repoEntries by viewModel.repoEntries.collectAsState(initial = emptyList())
     val busy by viewModel.busy.collectAsState()
 
     var showAddMenu by remember { mutableStateOf(false) }
