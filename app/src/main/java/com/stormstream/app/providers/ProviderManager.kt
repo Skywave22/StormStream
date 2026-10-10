@@ -579,15 +579,35 @@ class ProviderManager private constructor(
             }
         }
 
+    /**
+     * Resolve streams for an item. The item's own provider answers first;
+     * every enabled Nuvio scraper then contributes its streams too (best
+     * effort — they are TMDB/imdb-keyed stream sources), so the stream picker
+     * shows one unified, provider-attributed list across ecosystems.
+     */
     suspend fun getStreams(item: MediaItem, episode: Episode?): StormResult<List<StreamSource>> =
         withContext(Dispatchers.IO) {
             val p = get(item.providerId)
                 ?: return@withContext StormResult.Err(StormError.NotInstalled(item.providerId))
-            try {
-                StormResult.Ok(p.getStreams(item, episode))
+            val own = try {
+                p.getStreams(item, episode)
             } catch (e: Throwable) {
-                StormResult.Err(StormError.ProviderCrashed(item.providerId, e))
+                return@withContext StormResult.Err(StormError.ProviderCrashed(item.providerId, e))
             }
+            val extra = coroutineScope {
+                enabledProviders()
+                    .filter { it.config.type == ProviderType.NUVIO && it.config.id != item.providerId }
+                    .map { provider ->
+                        async {
+                            runCatching { provider.getStreams(item, episode) }
+                                .onFailure { Log.w(TAG, "Nuvio streams failed on ${provider.config.id}", it) }
+                                .getOrDefault(emptyList())
+                        }
+                    }
+                    .awaitAll()
+                    .flatten()
+            }
+            StormResult.Ok((own + extra).distinctBy { it.url + it.providerId })
         }
 
     // ---- helpers ----

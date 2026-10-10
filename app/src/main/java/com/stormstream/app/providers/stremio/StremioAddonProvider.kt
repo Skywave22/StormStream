@@ -120,6 +120,9 @@ class StremioAddonProvider(
             rating = meta.imdbRating?.toString()?.toDoubleOrNull(),
             description = meta.description ?: item.description,
             genres = meta.genres ?: item.genres,
+            cast = meta.cast?.filter { it.isNotBlank() } ?: item.cast,
+            runtime = meta.runtime ?: item.runtime,
+            imdbId = item.imdbId ?: meta.id.takeIf { it.startsWith("tt") },
             totalSeasons = meta.videos?.let { vs -> vs.mapNotNull { it.season }.maxOrNull() }
                 ?: item.totalSeasons,
         )
@@ -284,6 +287,10 @@ data class StremioMeta(
     val description: String? = null,
     val genres: List<String>? = null,
     val imdbRating: Double? = null,
+    val runtime: String? = null,
+    val director: String? = null,
+    val cast: List<String>? = null,
+    val trailers: List<StremioTrailer>? = null,
     val videos: List<StremioVideo>? = null,
 ) {
     fun toMediaItem(providerId: String): MediaItem {
@@ -305,9 +312,20 @@ data class StremioMeta(
             rating = imdbRating,
             description = description,
             genres = genres.orEmpty(),
+            // Stremio ids are usually IMDb ids — keep them so other ecosystems
+            // (Nuvio/TMDB) can cross-resolve this item.
+            imdbId = id.takeIf { it.startsWith("tt") },
+            cast = cast.orEmpty(),
+            runtime = runtime,
         )
     }
 }
+
+@Serializable
+data class StremioTrailer(
+    val source: String? = null,
+    val type: String? = null,
+)
 
 @Serializable
 data class StremioVideo(

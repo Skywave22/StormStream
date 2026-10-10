@@ -127,6 +127,23 @@ fun DetailScreen(
                                 }
                             }
                         }
+                        if (media.cast.isNotEmpty()) {
+                            item(key = "cast") {
+                                Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                                    Text(
+                                        text = "Cast",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = media.cast.joinToString(" · "),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
                         if (media.description != null || media.genres.isNotEmpty()) {
                             item(key = "meta") {
                                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -234,6 +251,7 @@ fun DetailScreen(
         ) {
             StreamPickerContent(
                 streams = streams,
+                providerName = { viewModel.providerName(it) },
                 onSelect = { source ->
                     showStreamPicker = false
                     val media = item
@@ -302,6 +320,7 @@ private fun DetailHero(media: MediaItem) {
                 Text(
                     text = listOfNotNull(
                         media.year?.toString(),
+                        media.runtime,
                         media.rating?.let { "★ ${"%.1f".format(it)}" },
                     ).joinToString(" · "),
                     style = MaterialTheme.typography.bodyMedium,

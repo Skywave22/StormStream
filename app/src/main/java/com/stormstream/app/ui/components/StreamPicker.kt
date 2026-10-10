@@ -29,6 +29,7 @@ fun StreamPickerContent(
     streams: List<StreamSource>,
     onSelect: (StreamSource) -> Unit,
     modifier: Modifier = Modifier,
+    providerName: (String) -> String = { it },
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
@@ -66,6 +67,11 @@ fun StreamPickerContent(
                                 append(source.type.name)
                                 if (source.subtitles.isNotEmpty()) {
                                     append(" · ${source.subtitles.size} subtitle${if (source.subtitles.size > 1) "s" else ""}")
+                                }
+                                val provider = providerName(source.providerId)
+                                if (provider.isNotBlank()) {
+                                    append(" · ")
+                                    append(provider)
                                 }
                             },
                             style = MaterialTheme.typography.labelMedium,

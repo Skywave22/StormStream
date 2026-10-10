@@ -118,6 +118,10 @@ data class MediaItem(
     val tmdbId: String? = null,
     /** IMDb id when known (TMDB find-by-imdb fallback). */
     val imdbId: String? = null,
+    /** Cast names, when the provider reports them. */
+    val cast: List<String> = emptyList(),
+    /** Runtime label ("1h 42m"), when the provider reports it. */
+    val runtime: String? = null,
 )
 
 @Serializable
