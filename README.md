@@ -232,7 +232,7 @@ Everything persists across restarts (DataStore).
 ./gradlew assembleDebug
 ```
 
-Requires JDK 17 + Android SDK (compileSdk 34, minSdk 24). CI builds the debug
+Requires JDK 17 + Android SDK (compileSdk 36, targetSdk 34, minSdk 24). CI builds the debug
 APK on every push (`.github/workflows/build-apk.yml`).
 
 ## Player details (libmpv)

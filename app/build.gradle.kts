@@ -7,7 +7,8 @@ plugins {
 
 android {
     namespace = "com.stormstream.app"
-    compileSdk = 34
+    // compileSdk 36: required by mpv-android-lib / quickjs-kt / ksoup AAR metadata (built with compileSdk 36)
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.stormstream.app"
