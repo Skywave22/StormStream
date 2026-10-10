@@ -127,15 +127,6 @@ fun HomeScreen(
                                     ContinueWatchingCard(
                                         progress = progress,
                                         onClick = {
-                                            viewModel.openItem(
-                                                MediaItem(
-                                                    id = progress.itemKey.substringAfter('|'),
-                                                    providerId = progress.providerId,
-                                                    title = progress.title,
-                                                    type = MediaType.MOVIE,
-                                                    posterUrl = progress.posterUrl,
-                                                )
-                                            )
                                             onItemClick(
                                                 MediaItem(
                                                     id = progress.itemKey.substringAfter('|'),
