@@ -48,7 +48,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           add-job-summary: on-failure
-          gradle-version: "8.9"
+          gradle-version: "9.4.1"
 
       - name: Build debug APK
         run: |
