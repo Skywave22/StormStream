@@ -2,7 +2,7 @@ package com.stormstream.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -71,9 +71,9 @@ fun PosterCard(
                 .border(
                     width = if (focused) 2.dp else 1.dp,
                     brush = if (focused) {
-                        Brush.solid(MaterialTheme.colorScheme.primary)
+                        SolidColor(MaterialTheme.colorScheme.primary)
                     } else {
-                        Brush.solid(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+                        SolidColor(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
                     },
                     shape = RoundedCornerShape(14.dp),
                 )

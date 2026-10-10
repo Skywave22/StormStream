@@ -389,12 +389,14 @@ class MpvPlayerController private constructor(context: Context) {
 
     /** Stop playback and the background service (the libmpv instance stays alive). */
     fun stop() {
-        runCatching {
-            val item = currentItem
-            val pos = _position.value
-            val dur = _duration.value
-            if (item != null && pos > 0 && dur > 0) {
-                watchProgress.record(item, pos, dur)
+        scope.launch {
+            runCatching {
+                val item = currentItem
+                val pos = _position.value
+                val dur = _duration.value
+                if (item != null && pos > 0 && dur > 0) {
+                    watchProgress.record(item, pos, dur)
+                }
             }
         }
         runCatching { mpv?.command("stop") }
