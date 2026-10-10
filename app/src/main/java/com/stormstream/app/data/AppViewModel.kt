@@ -76,22 +76,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _homeRows = MutableStateFlow<List<HomeRow>>(emptyList())
     val homeRows: StateFlow<List<HomeRow>> = _homeRows.asStateFlow()
 
-    /** Items worth resuming (Continue watching), most recent first. */
-    val continueWatching: StateFlow<List<com.stormstream.app.data.WatchProgress>> =
-        watchProgress.progress
-            .map { map -> map.values.filter { it.resumable }.sortedByDescending { it.updatedAt }.take(20) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    /** Position to seek to right after the next play() starts (resume). */
-    @Volatile
-    private var pendingResumeSec: Double? = null
-
-    /** Progress for the currently open item, if any. */
-    val currentProgress: StateFlow<com.stormstream.app.data.WatchProgress?> =
-        _selectedItem.map { item ->
-            item?.let { watchProgress.snapshot()[WatchProgressStore.keyFor(it.providerId, it.id)] }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
     private val _homeRefreshing = MutableStateFlow(false)
     val homeRefreshing: StateFlow<Boolean> = _homeRefreshing.asStateFlow()
 
@@ -107,6 +91,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _selectedItem = MutableStateFlow<MediaItem?>(null)
     val selectedItem: StateFlow<MediaItem?> = _selectedItem.asStateFlow()
+
+    /** Items worth resuming (Continue watching), most recent first. */
+    val continueWatching: StateFlow<List<com.stormstream.app.data.WatchProgress>> =
+        watchProgress.progress
+            .map { progressMap -> progressMap.values.filter { it.resumable }.sortedByDescending { it.updatedAt }.take(20) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Position to seek to right after the next play() starts (resume). */
+    @Volatile
+    private var pendingResumeSec: Double? = null
+
+    /** Progress for the currently open item, if any. */
+    val currentProgress: StateFlow<com.stormstream.app.data.WatchProgress?> =
+        _selectedItem.map { item ->
+            item?.let { watchProgress.snapshot()[WatchProgressStore.keyFor(it.providerId, it.id)] }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     private val _episodes = MutableStateFlow<List<Episode>>(emptyList())
     val episodes: StateFlow<List<Episode>> = _episodes.asStateFlow()
