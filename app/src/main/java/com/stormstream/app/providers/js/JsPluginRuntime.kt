@@ -83,8 +83,8 @@ class JsPluginRuntime(
      *
      * @param modules     module name → source (CommonJS mode) or a single
      *                    "main" entry (script mode).
-     * @param dialect     force the dialect ("storm"/"vega"/"skystream"/"nuvio")
-     *                    instead of auto-detecting.
+     * @param forcedDialect force the dialect ("storm"/"vega"/"skystream"/
+     *                    "nuvio") instead of auto-detecting.
      * @param scriptMode  evaluate the source as a plain script with a CommonJS
      *                    prelude (SkyStream/Nuvio plugins are plain scripts that
      *                    publish functions on globalThis or module.exports).
@@ -95,7 +95,7 @@ class JsPluginRuntime(
      */
     suspend fun load(
         modules: Map<String, String>,
-        dialect: String? = null,
+        forcedDialect: String? = null,
         scriptMode: Boolean = false,
         manifestJson: String? = null,
         scraperId: String? = null,
@@ -153,7 +153,7 @@ class JsPluginRuntime(
             }
 
             val infoJson = qjs.evaluate<String>(
-                "globalThis.__stormDetect(${dialect?.toJsStringLiteral() ?: "null"})",
+                "globalThis.__stormDetect(${forcedDialect?.toJsStringLiteral() ?: "null"})",
                 filename = "storm-detect.js"
             )
             val parsed = StormJson.decodeFromString<JsPluginInfo>(infoJson)

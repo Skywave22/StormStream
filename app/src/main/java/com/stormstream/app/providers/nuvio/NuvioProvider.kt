@@ -26,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -235,11 +236,11 @@ class NuvioProvider(
                 ?: return@withContext emptyList()
             val mediaType = if (item.type == MediaType.SERIES || item.type == MediaType.ANIME) "tv" else "movie"
             val args = buildJsonArray {
-                add(tmdbId)
-                add(mediaType)
+                add(JsonPrimitive(tmdbId))
+                add(JsonPrimitive(mediaType))
                 if (episode != null) {
-                    add(episode.season)
-                    add(episode.number)
+                    add(JsonPrimitive(episode.season))
+                    add(JsonPrimitive(episode.number))
                 } else {
                     add(JsonNull)
                     add(JsonNull)

@@ -10,6 +10,8 @@ import com.stormstream.app.data.RepoPlugin
 import com.stormstream.app.net.StormHttpClient
 import com.stormstream.app.providers.ProviderManager
 import com.stormstream.app.util.StormJson
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
