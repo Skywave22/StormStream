@@ -3,6 +3,7 @@ package com.stormstream.app.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -43,6 +44,14 @@ class ExtensionStore(private val context: Context) {
                 }.getOrDefault(emptyList())
             } ?: emptyList()
         }
+
+    /** True once the curated default sources have been installed (first run only). */
+    val defaultsInstalled: Flow<Boolean> =
+        store.data.map { prefs -> prefs[KEY_DEFAULTS_INSTALLED] ?: false }
+
+    suspend fun markDefaultsInstalled() {
+        store.edit { prefs -> prefs[KEY_DEFAULTS_INSTALLED] = true }
+    }
 
     suspend fun extensionsSnapshot(): List<InstalledExtension> = extensions.first()
     suspend fun reposSnapshot(): List<RepoEntry> = repos.first()
@@ -87,6 +96,7 @@ class ExtensionStore(private val context: Context) {
     companion object {
         private val KEY_EXTENSIONS = stringPreferencesKey("installed_extensions")
         private val KEY_REPOS = stringPreferencesKey("repos")
+        private val KEY_DEFAULTS_INSTALLED = booleanPreferencesKey("defaults_installed")
 
         @Volatile
         private var instance: ExtensionStore? = null

@@ -114,17 +114,16 @@ private fun HandleDeepLink(intent: Intent?, viewModel: AppViewModel) {
     LaunchedEffect(intent) {
         val uri = intent?.data ?: return@LaunchedEffect
         when (uri.scheme?.lowercase()) {
-            "stremio" -> {
-                val https = "https://${uri.host.orEmpty()}${uri.path.orEmpty()}"
-                viewModel.installStremio(https)
-            }
-            "storm" -> {
-                val https = "https://${uri.host.orEmpty()}${uri.path.orEmpty()}"
-                viewModel.installJsPlugin(https, name = null)
-            }
+            "stremio" -> viewModel.installStremio(uri.toHttpsUrl())
+            "storm" -> viewModel.installJsPlugin(uri.toHttpsUrl(), name = null)
         }
     }
 }
+
+/** stremio://host/path?query -> https://host/path?query */
+private fun Uri.toHttpsUrl(): String =
+    "https://${host.orEmpty()}${encodedPath.orEmpty()}" +
+        (encodedQuery?.let { "?$it" } ?: "")
 
 private data class BottomTab(val screen: StormScreen, val icon: ImageVector, val label: String)
 
@@ -136,13 +135,8 @@ private fun StormAppRoot(viewModel: AppViewModel) {
     // Route deep links from onNewIntent through the ViewModel.
     MainActivity.deepLinkHandler = { uri ->
         when (uri.scheme?.lowercase()) {
-            "stremio" ->
-                viewModel.installStremio("https://${uri.host.orEmpty()}${uri.path.orEmpty()}")
-            "storm" ->
-                viewModel.installJsPlugin(
-                    "https://${uri.host.orEmpty()}${uri.path.orEmpty()}",
-                    name = null,
-                )
+            "stremio" -> viewModel.installStremio(uri.toHttpsUrl())
+            "storm" -> viewModel.installJsPlugin(uri.toHttpsUrl(), name = null)
         }
     }
 
@@ -236,6 +230,7 @@ private fun StormAppRoot(viewModel: AppViewModel) {
                 DetailScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() },
+                    onPlayStart = { navController.navigate(StormScreen.Player.route) },
                 )
             }
             composable(StormScreen.Player.route) {

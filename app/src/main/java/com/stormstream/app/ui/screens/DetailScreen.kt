@@ -67,6 +67,7 @@ import com.stormstream.app.ui.components.TypeBadge
 fun DetailScreen(
     viewModel: AppViewModel = viewModel(),
     onBack: () -> Unit,
+    onPlayStart: () -> Unit = {},
 ) {
     val item by viewModel.selectedItem.collectAsState()
     val episodes by viewModel.episodes.collectAsState()
@@ -99,7 +100,10 @@ fun DetailScreen(
                             Column(Modifier.padding(horizontal = 16.dp)) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(
-                                        onClick = { viewModel.playSelected(openPicker = { showStreamPicker = true }) },
+                                        onClick = {
+                                            onPlayStart()
+                                            viewModel.playSelected(openPicker = { showStreamPicker = true })
+                                        },
                                         modifier = Modifier.weight(1f),
                                     ) {
                                         Icon(Icons.Default.PlayArrow, contentDescription = null)
@@ -177,7 +181,10 @@ fun DetailScreen(
                                     episode = ep,
                                     selected = selectedEpisode?.id == ep.id,
                                     onClick = { viewModel.selectEpisode(ep) },
-                                    onPlay = { viewModel.selectEpisode(ep, autoPlay = true) },
+                                    onPlay = {
+                                        onPlayStart()
+                                        viewModel.selectEpisode(ep, autoPlay = true)
+                                    },
                                 )
                             }
                         } else if (streams.isNotEmpty()) {
@@ -193,6 +200,7 @@ fun DetailScreen(
                                         StreamRow(
                                             source = source,
                                             onClick = {
+                                                onPlayStart()
                                                 viewModel.playSource(media, null, source)
                                             },
                                         )
@@ -233,6 +241,7 @@ fun DetailScreen(
                         viewModel.selectedEpisode.value ?: episodes.firstOrNull()
                     } else null
                     if (media != null) {
+                        onPlayStart()
                         viewModel.playSource(media, ep, source)
                     }
                 },

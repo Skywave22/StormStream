@@ -132,12 +132,13 @@ class JsPluginRuntime(
             null
         }
 
-    fun shutdown() {
-        try {
-            quickJs?.close()
-        } catch (_: Throwable) {
-        }
+    suspend fun shutdown() {
+        val qjs = quickJs
         quickJs = null
+        if (qjs != null) {
+            // Close on the engine thread so we never race an in-flight evaluation.
+            withContext(dispatcher) { runCatching { qjs.close() } }
+        }
         // Also stops the backing single-thread executor.
         runCatching { dispatcher.close() }
     }

@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -130,12 +131,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val repoEntries = repoManager.repoEntries
 
     init {
+        // Auto-advance lives here (not in the player screen) so it also works
+        // when the app is backgrounded while an episode plays.
         viewModelScope.launch {
-            val hadExtensions = extensionStore.extensionsSnapshot().isNotEmpty()
+            player.playbackEnded.collect { playNextEpisode() }
+        }
+        viewModelScope.launch {
             providerManager.restore()
-            if (!hadExtensions) {
-                providerManager.bootstrapDefaultsIfNeeded()
-            }
+            providerManager.bootstrapDefaultsIfNeeded()
             repoManager.loadAll()
             refreshHome()
         }
@@ -148,17 +151,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _homeRefreshing.value = true
             val catalogs = providerManager.allHomeCatalogs()
             _homeRows.value = catalogs.map { HomeRow(catalog = it, items = emptyList()) }
-            catalogs.forEach { ref ->
-                launch {
-                    val r = providerManager.catalogPage(ref, 1)
-                    _homeRows.value = _homeRows.value.map { row ->
-                        if (row.catalog != ref) return@map row
-                        when (r) {
-                            is StormResult.Ok -> row.copy(
-                                items = r.value.filterAdult().take(HOME_ROW_LIMIT),
-                                isLoading = false,
-                            )
-                            is StormResult.Err -> row.copy(isLoading = false, error = r.error.message)
+            coroutineScope {
+                catalogs.forEach { ref ->
+                    launch {
+                        val r = providerManager.catalogPage(ref, 1)
+                        _homeRows.value = _homeRows.value.map { row ->
+                            if (row.catalog != ref) return@map row
+                            when (r) {
+                                is StormResult.Ok -> row.copy(
+                                    items = r.value.filterAdult().take(HOME_ROW_LIMIT),
+                                    isLoading = false,
+                                )
+                                is StormResult.Err -> row.copy(isLoading = false, error = r.error.message)
+                            }
                         }
                     }
                 }
@@ -355,20 +360,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val state = _browse.value ?: return
         if (state.isLoading || state.endReached) return
         viewModelScope.launch {
-            _browse.value = _browse.value?.copy(isLoading = true)
-            val r = providerManager.catalogPage(state.catalog, state.page + 1)
+            // Re-check inside the coroutine: a second call may have started a page
+            // load between the guard above and this coroutine getting dispatched.
+            val current = _browse.value ?: return@launch
+            if (current.isLoading || current.endReached) return@launch
+            _browse.value = current.copy(isLoading = true)
+            val r = providerManager.catalogPage(current.catalog, current.page + 1)
             _browse.value = when (r) {
                 is StormResult.Ok -> {
                     val newItems = r.value.filterAdult()
-                    state.copy(
-                        items = (state.items + newItems).distinctBy { it.id + it.providerId },
-                        page = state.page + 1,
+                    val merged = (current.items + newItems).distinctBy { it.id + it.providerId }
+                    current.copy(
+                        items = merged,
+                        page = current.page + 1,
                         isLoading = false,
-                        endReached = newItems.size < BROWSE_PAGE_SIZE,
+                        // Stop when the page is short or the provider keeps
+                        // returning items we already have (no skip support).
+                        endReached = newItems.size < BROWSE_PAGE_SIZE || merged.size == current.items.size,
                         error = null,
                     )
                 }
-                is StormResult.Err -> state.copy(isLoading = false, error = r.error.message)
+                is StormResult.Err -> current.copy(isLoading = false, error = r.error.message)
             }
         }
     }

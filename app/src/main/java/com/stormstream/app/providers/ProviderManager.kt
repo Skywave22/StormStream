@@ -28,6 +28,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -267,17 +268,20 @@ class ProviderManager private constructor(
     // ---- restore / bootstrap ----
 
     /** Re-register every persisted extension. Called once on app start. */
-    suspend fun restore() {
+    suspend fun restore() = coroutineScope {
         val extensions = extensionStore.extensionsSnapshot()
         val disabled = extensions.filter { !it.config.enabled }.map { it.config.id }.toSet()
         _disabledIds.value = disabled
-        extensions.forEach { ext ->
-            val r = restoreOne(ext)
-            if (r is StormResult.Err) {
-                setError(ext.config.id, r.error.message)
-                Log.w(TAG, "Failed to restore ${ext.config.id}: ${r.error.message}")
+        // Restore concurrently: several extensions do network I/O on init.
+        extensions.map { ext ->
+            async {
+                val r = restoreOne(ext)
+                if (r is StormResult.Err) {
+                    setError(ext.config.id, r.error.message)
+                    Log.w(TAG, "Failed to restore ${ext.config.id}: ${r.error.message}")
+                }
             }
-        }
+        }.awaitAll()
     }
 
     private suspend fun restoreOne(ext: InstalledExtension): StormResult<ProviderConfig> =
@@ -323,9 +327,14 @@ class ProviderManager private constructor(
             }
         }
 
-    /** Install two curated sources on first run so Home is never empty. */
+    /**
+     * Install two curated sources on first run so Home is never empty.
+     * Guarded by a persisted flag so the defaults do NOT come back after the
+     * user deliberately uninstalls everything.
+     */
     suspend fun bootstrapDefaultsIfNeeded() {
-        if (extensionStore.extensionsSnapshot().isNotEmpty()) return
+        if (extensionStore.defaultsInstalled.first()) return
+        extensionStore.markDefaultsInstalled()
         installStremioAddon("https://v3-cinemeta.strem.io/manifest.json")
         installIptvPlaylist("IPTV Demo", "https://iptv-org.github.io/iptv/index.m3u")
     }

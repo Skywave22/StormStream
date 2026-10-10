@@ -156,13 +156,6 @@ fun PlayerScreen(
         }
     }
 
-    // Auto-play the next episode when this one ends.
-    LaunchedEffect(Unit) {
-        player.playbackEnded.collect {
-            viewModel.playNextEpisode()
-        }
-    }
-
     // Immersive fullscreen while the player is open.
     val view = LocalView.current
     DisposableEffect(Unit) {

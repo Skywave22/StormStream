@@ -67,8 +67,10 @@ class StremioAddonProvider(
 
     override suspend fun getCatalog(ref: CatalogRef, page: Int): List<MediaItem> {
         val stype = ref.extra["stremioType"] ?: "movie"
-        val url = "$baseUrl/catalog/$stype/${ref.catalogId}.json"
-        val body = http.get(url)
+        val root = "$baseUrl/catalog/$stype/${ref.catalogId}"
+        // Stremio paginates with a "skip" extra: /catalog/{type}/{id}/skip=N.json
+        val url = if (page > 1) "$root/skip=${(page - 1) * SKIP_PAGE_SIZE}.json" else "$root.json"
+        val body = runCatching { http.get(url) }.getOrNull() ?: return emptyList()
         val parsed = StormJson.decodeFromString<StremioCatalogResponse>(body)
         return parsed.metas.map { it.toMediaItem(ref.providerId) }
     }
@@ -160,20 +162,22 @@ class StremioAddonProvider(
         }
         val body = runCatching { http.get(url) }.getOrNull() ?: return emptyList()
         val resp = StormJson.decodeFromString<StremioStreamResponse>(body)
-        return resp.streams.map { s ->
+        return resp.streams.mapNotNull { s ->
+            // libmpv plays direct media URLs only — skip magnets, YouTube ids and
+            // watch pages (externalUrl), which a bare libmpv cannot decode.
+            val streamUrl = s.url ?: return@mapNotNull null
             StreamSource(
                 name = s.title ?: s.name ?: "Stream",
-                url = s.url ?: s.externalUrl ?: s.infoHash?.let { "magnet:?xt=urn:btih:$it" } ?: return@map null,
+                url = streamUrl,
                 type = when {
-                    s.url?.endsWith(".m3u8") == true -> StreamType.HLS
-                    s.url?.endsWith(".mpd") == true -> StreamType.DASH
-                    s.url?.endsWith(".mp4") == true -> StreamType.MP4
-                    s.url?.endsWith(".mkv") == true -> StreamType.MKV
-                    s.infoHash != null -> StreamType.MP4 // torrent — not playable without a resolver; leave MP4 as placeholder
-                    else -> inferTypeFromHeaders(s)
+                    streamUrl.endsWith(".m3u8") || streamUrl.contains("m3u8") -> StreamType.HLS
+                    streamUrl.endsWith(".mpd") || streamUrl.contains("mpd") -> StreamType.DASH
+                    streamUrl.endsWith(".mp4") -> StreamType.MP4
+                    streamUrl.endsWith(".mkv") -> StreamType.MKV
+                    else -> StreamType.UNKNOWN
                 },
                 quality = s.qualityLabel ?: s.bitrate?.let { "${it / 1000}kbps" },
-                headers = s.httpHeaders.orEmpty(),
+                headers = s.httpHeaders ?: s.behaviorHints?.proxyHeaders.orEmpty(),
                 subtitles = s.subtitles.map { sub ->
                     Subtitle(
                         label = sub.label ?: sub.lang ?: "Subtitle",
@@ -183,16 +187,6 @@ class StremioAddonProvider(
                 },
                 providerId = config.id,
             )
-        }.filterNotNull()
-    }
-
-    private fun inferTypeFromHeaders(s: StremioStream): StreamType {
-        val url = s.url ?: return StreamType.UNKNOWN
-        return when {
-            url.contains("m3u8") -> StreamType.HLS
-            url.contains("mpd") -> StreamType.DASH
-            url.contains(".mp4") -> StreamType.MP4
-            else -> StreamType.HLS
         }
     }
 
@@ -223,6 +217,9 @@ class StremioAddonProvider(
     }
 
     companion object {
+        /** Items skipped per page when a catalog is paged with the skip extra. */
+        private const val SKIP_PAGE_SIZE = 24
+
         fun fromUrl(http: StormHttpClient, url: String): StremioAddonProvider {
             val body = http.get(url)
             val manifest = StormJson.decodeFromString<StremioManifest>(body)
@@ -350,6 +347,7 @@ data class StremioBehaviorHints(
     val videoSize: Long? = null,
     val filename: String? = null,
     val notWebReady: Boolean? = null,
+    @SerialName("proxyHeaders") val proxyHeaders: Map<String, String>? = null,
 )
 
 @Serializable
