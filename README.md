@@ -18,6 +18,12 @@ dark-first UI, and **exactly one player: libmpv, bundled inside the app**.
 | **IPTV / M3U** | M3U/M3U8 playlists become group catalogs of live channels (`IptvProvider`). |
 | **JS plugins (StormJS)** | JavaScript plugins run **in-app** in an embedded QuickJS engine (`quickjs-kt`) with a sandboxed `storm` API: HTTP, HTML parsing, key-value storage (`JsProvider` + `JsPluginRuntime` + `assets/storm-js-shim.js`). |
 | **Vega providers** | JSON-based Vega-style providers (CommonJS `catalog`/`posts`/`meta`/`episodes`/`stream` modules) are auto-detected and bridged through the same runtime (`providerContext.axios` etc.). |
+| **SkyStream extensions** | `.sky` packages (`plugin.json` + `plugin.js`) and direct `plugin.js` URLs run in QuickJS with the SkyStream API: `getHome`/`search`/`load`/`loadStreams`, `manifest` global, `http_get`/`http_post`/`http_parallel`, `getPreference`/`setPreference`, cheerio, `MultimediaItem`/`StreamResult` classes. Manifest-declared `settings[]` become the extension's settings dialog (`SkyStreamProvider`). |
+| **Nuvio extensions** | Nuvio `manifest.json` scrapers run in QuickJS with `getStreams(tmdbId, mediaType, season, episode)` + `onSettings()` layouts, `SCRAPER_ID`/`SCRAPER_SETTINGS`, and polyfills (fetch, cheerio, timers, TextEncoder, Blob, URL, AbortController, CryptoJS over native digest/HMAC/AES). Scrapers are browsed through TMDB (`TmdbClient`) and contribute streams to ANY item's stream list (`NuvioProvider`). |
+| **Unified streams** | The stream picker merges the item's own provider with every enabled Nuvio scraper — one provider-attributed list across ecosystems. |
+| **Continue watching** | Per-item progress is persisted (`WatchProgressStore`); Home shows a Continue watching shelf, Detail offers Resume. |
+| **Accent themes** | 11 user-pickable accent palettes drive the whole Material 3 scheme + player from Settings. |
+| **Logs & diagnostics** | Rolling on-device log (Settings → Logs) with share (plain text) and clear. |
 | **Extension repos** | Add a `repo.json` URL (Hiki/Vega/SkyStream shape, CloudStream `pluginLists` shape, plain JSON array, or a `github.com/owner/repo` shorthand) and browse + install plugins from it (`PluginRepoManager`). |
 | **Persistence** | Every install / uninstall / enable-toggle / repo is stored in DataStore and replayed on app start — extensions survive restarts (`ExtensionStore`, `ProviderManager.restore()`). |
 
@@ -43,6 +49,8 @@ app/src/main/java/com/stormstream/app/
 │   ├── StreamProvider.kt      the ONE contract every backend implements
 │   ├── ProviderManager.kt     registry, install/uninstall/restore, fan-out queries
 │   ├── stremio/               Stremio v3 addon protocol
+│   ├── skystream/             SkyStream .sky packages / plugin.js runtime
+│   ├── nuvio/                 Nuvio manifest scrapers (TMDB-keyed streams)
 │   ├── scraper/               universal HTML/JSON scraper configs
 │   ├── iptv/                  M3U playlists
 │   ├── js/                    QuickJS runtime (JsPluginRuntime, JsProvider, DTOs)
@@ -206,16 +214,23 @@ detection and error paths (25 assertions).
 Add a repository from **Extensions → + → Extension repository**:
 
 - a `repo.json` URL in the Hiki/Vega/SkyStream shape:
-  `{ "name": "...", "plugins": [{ "name", "url", "version", "tvTypes", "icon", "providerType", "description", "files": { "<module>": "<url>" } }] }`
+  `{ "name": "...", "plugins": [{ "name", "url", "version", "tvTypes", "icon", "providerType", "description", "files": { "<module>": "<url>" }, "packageName", "manifest" }], "pluginLists": [...], "repos": [...] }`
 - a CloudStream-style manifest: `{ "name": "...", "pluginLists": ["<url>"] }`
+- a Nuvio manifest URL: `{ "name": "...", "scrapers": [{ "id", "name", "filename", "supportedTypes", "hasSettings" }] }`
 - a plain JSON array of plugin objects
 - a `github.com/owner/repo` shorthand (rewritten to the repo's `builds/repo.json`)
 
 `providerType` values map onto what StormStream can actually install:
 `stremio` → addon, `scraper`/`universal` → scraper config, `iptv`/`m3u` →
-playlist, everything else (`vega`, `nuvio`, `sora`, `skystream`, `cloudstream`,
-…) → JS plugin through the QuickJS runtime. Plugins with a `files` map are
+playlist, `js`/`storm` → JS plugin, `skystream`/`sky` → SkyStream extension
+(`.sky` packages or `plugin.js`), `nuvio` → Nuvio manifest. CloudStream
+`.cs3`/`.dex` plugins are rejected with a clear error (StormStream runs
+JavaScript plugins, not dex runtimes). Plugins with a `files` map are
 downloaded as multi-file JS plugins.
+
+See `docs/SYSTEM_ANALYSIS.md` for the full research and design notes behind
+the provider layer (SkyStream/Nuvio/Stremio ecosystems, Hikari's provider
+handling, and the UI/UX decisions).
 
 ## Deep links
 
