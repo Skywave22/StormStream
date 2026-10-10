@@ -42,6 +42,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -678,11 +679,11 @@ private fun ExtensionSettingsDialog(
     var loadError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(providerId) {
-        runCatching {
+        try {
             fields = viewModel.settingsFieldsFor(providerId)
             values = viewModel.settingsValuesFor(providerId)
-        }.onFailure {
-            loadError = it.message ?: "Failed to load settings"
+        } catch (e: Throwable) {
+            loadError = e.message ?: "Failed to load settings"
         }
     }
 

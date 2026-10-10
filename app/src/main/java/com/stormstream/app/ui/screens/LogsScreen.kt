@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -38,6 +39,7 @@ import com.stormstream.app.util.AppLog
  * can read, share (plain text — no FileProvider needed) and clear. Bug
  * reports carry the real error text instead of a screenshot.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogsScreen(
     onBack: () -> Unit,
