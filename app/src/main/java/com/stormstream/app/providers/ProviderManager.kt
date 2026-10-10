@@ -265,12 +265,12 @@ class ProviderManager private constructor(
 
     /**
      * Install a SkyStream plugin from a direct plugin.js URL (plus an optional
-     * plugin.json manifest URL, as used by SkyStream repositories).
+     * inline plugin.json manifest, as used by SkyStream repositories).
      */
     suspend fun installSkyStreamPlugin(
         name: String,
         jsUrl: String,
-        manifestUrl: String? = null,
+        manifestJson: String? = null,
     ): StormResult<ProviderConfig> = withContext(Dispatchers.IO) {
         try {
             val pkg = SkyStreamProvider.safeDirName(name)
@@ -278,10 +278,8 @@ class ProviderManager private constructor(
             runCatching { dir.deleteRecursively() }
             dir.mkdirs()
             http.download(jsUrl, File(dir, "plugin.js"))
-            val manifest = manifestUrl?.let { mu ->
-                runCatching {
-                    StormJson.decodeFromString<SkyStreamManifest>(http.get(mu))
-                }.getOrNull()
+            val manifest = manifestJson?.let { json ->
+                runCatching { StormJson.decodeFromString<SkyStreamManifest>(json) }.getOrNull()
             } ?: SkyStreamManifest(
                 packageName = pkg,
                 name = name,

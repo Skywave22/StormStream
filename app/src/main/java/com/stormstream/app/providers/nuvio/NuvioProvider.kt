@@ -96,7 +96,7 @@ class NuvioProvider(
         )
         val result = runtime.load(
             modules = mapOf("main" to source),
-            dialect = "nuvio",
+            forcedDialect = "nuvio",
             scriptMode = true,
             scraperId = scraper.id,
             scraperSettingsJson = settingsJson,

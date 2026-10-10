@@ -94,7 +94,7 @@ class SkyStreamProvider(
             ?: throw StormError.Unsupported("SkyStream plugin has no plugin.js")
         val result = runtime.load(
             modules = mapOf("main" to source),
-            dialect = "skystream",
+            forcedDialect = "skystream",
             scriptMode = true,
             manifestJson = manifestJson,
         )
@@ -190,7 +190,7 @@ class SkyStreamProvider(
     override suspend fun getEpisodes(item: MediaItem): List<Episode>? = withContext(Dispatchers.IO) {
         val url = item.internalUrl ?: item.id
         val detail = loadDetail(url) ?: return@withContext null
-        val eps = detail["episodes"]?.jsonArray?.mapNotNull { it.toEpisode(item.id) }
+        val eps = detail["episodes"]?.jsonArray?.mapNotNull { (it as? JsonObject)?.toEpisode(item.id) }
         if (eps.isNullOrEmpty()) null else eps
     }
 

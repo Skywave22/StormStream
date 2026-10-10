@@ -177,7 +177,7 @@ class PluginRepoManager(
                     providerManager.installSkyStreamPlugin(
                         name = plugin.packageName ?: plugin.name,
                         jsUrl = plugin.url,
-                        manifestUrl = plugin.manifest?.let { http.resolve(url, it) },
+                        manifestJson = plugin.manifest,
                     ).map { }
                 }
             ProviderType.JS ->
