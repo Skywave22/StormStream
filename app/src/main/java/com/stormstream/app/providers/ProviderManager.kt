@@ -207,6 +207,8 @@ class ProviderManager private constructor(
     ): StormResult<ProviderConfig> = withContext(Dispatchers.IO) {
         try {
             val dir = File(pluginDir(), "js-" + slugify(name))
+            // Start clean so a re-install never leaves stale modules behind.
+            runCatching { dir.deleteRecursively() }
             dir.mkdirs()
 
             if (inlineSource != null) {

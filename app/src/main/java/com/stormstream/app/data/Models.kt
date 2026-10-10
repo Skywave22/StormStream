@@ -69,11 +69,12 @@ enum class ProviderType(val key: String) {
          * runtime map to [JS]; genuinely unknown values also map to [JS] and
          * fail with a clear error at load time if the file is not JavaScript.
          */
-        fun fromRepoType(raw: String?): ProviderType = when (raw?.lowercase()?.trim()) {
+        fun fromRepoType(raw: String?): ProviderType? = when (raw?.lowercase()?.trim()) {
             "stremio", "stremio-addon", "stremio_addon", "addon" -> STREMIO
             "scraper", "universal", "universal_scraper", "html", "json" -> SCRAPER
             "iptv", "m3u", "m3u8", "playlist" -> IPTV
-            else -> JS
+            "js", "storm", "stormjs", "javascript" -> JS
+            else -> null
         }
     }
 }

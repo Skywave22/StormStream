@@ -114,7 +114,11 @@ class PluginRepoManager(
      * really installed (downloaded, initialized, persisted).
      */
     suspend fun installPlugin(plugin: RepoPlugin): StormResult<Unit> = withContext(Dispatchers.IO) {
+        // Untyped plugins are assumed to be JS (StormJS / Vega style) — except
+        // CloudStream .cs3/.dex plugins, which this app cannot run.
         val type = ProviderType.fromRepoType(plugin.providerType)
+            ?: if (plugin.url.endsWith(".cs3") || plugin.url.endsWith(".dex")) null
+               else ProviderType.JS
         when (type) {
             ProviderType.STREMIO ->
                 providerManager.installStremioAddon(plugin.url).map { }
@@ -144,6 +148,12 @@ class PluginRepoManager(
                 } else {
                     providerManager.installJsPlugin(plugin.url, fallbackName = plugin.name).map { }
                 }
+            null -> StormResult.Err(
+                StormError.Unsupported(
+                    "CloudStream .cs3 plugins are not supported. StormStream runs " +
+                        "JavaScript plugins (StormJS / Vega-dialect), not CloudStream dex plugins."
+                )
+            )
         }
     }
 

@@ -32,6 +32,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -99,25 +102,37 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setHwdec(it) },
                     )
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        var speedDrag by remember { mutableStateOf<Float?>(null) }
+                        val speedShown = speedDrag?.toDouble() ?: speed
                         Text(
-                            text = "Default playback speed: ${"%.2f".format(speed).removeSuffix(".00")}x",
+                            text = "Default playback speed: ${"%.2f".format(speedShown).removeSuffix(".00")}x",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Slider(
-                            value = speed.toFloat(),
-                            onValueChange = { viewModel.setDefaultSpeed(it.toDouble()) },
+                            value = speedShown.toFloat(),
+                            onValueChange = { speedDrag = it },
+                            onValueChangeFinished = {
+                                viewModel.setDefaultSpeed(speedDrag?.toDouble() ?: speed)
+                                speedDrag = null
+                            },
                             valueRange = 0.5f..2f,
                             steps = 5,
                         )
                     }
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        var subScaleDrag by remember { mutableStateOf<Float?>(null) }
+                        val subScaleShown = subScaleDrag?.toDouble() ?: subScale
                         Text(
-                            text = "Subtitle size: ${"%.0f".format(subScale * 100)}%",
+                            text = "Subtitle size: ${"%.0f".format(subScaleShown * 100)}%",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Slider(
-                            value = subScale.toFloat(),
-                            onValueChange = { viewModel.setSubtitleScale(it.toDouble()) },
+                            value = subScaleShown.toFloat(),
+                            onValueChange = { subScaleDrag = it },
+                            onValueChangeFinished = {
+                                viewModel.setSubtitleScale(subScaleDrag?.toDouble() ?: subScale)
+                                subScaleDrag = null
+                            },
                             valueRange = 0.5f..2f,
                             steps = 5,
                         )
