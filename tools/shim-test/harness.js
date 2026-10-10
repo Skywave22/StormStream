@@ -33,6 +33,8 @@ const NET = {
     id: 'tt2', title: 'Trending Series', description: 'A great series.', genres: ['Drama', 'Sci-Fi'], rating: 7.5,
   },
   'https://api.testflix.com/page.html': '<html><body><div class="title">Scraped Title</div><a class="lnk" href="/x/1">x</a></body></html>',
+  'https://scraper.example/api/12345/movie/null/null': '<html><body><span class="name">Movie Title</span></body></html>',
+  'https://scraper.example/api/678/tv/2/5': '<html><body><span class="name">Show S2E5</span></body></html>',
 };
 
 const kv = {};
@@ -48,7 +50,8 @@ globalThis.__stormHttpRequest = async (method, url, body, headersJson) => {
   if (!entry) {
     return JSON.stringify({ status: 404, body: '', json: null, error: 'HTTP 404 for ' + url });
   }
-  const isHtml = url.endsWith('.html');
+  const isHtml = url.endsWith('.html') ||
+    (typeof entry === 'string' && entry.trimStart().startsWith('<'));
   const text = isHtml ? entry : JSON.stringify(entry);
   let json = null;
   if (!isHtml) { try { json = JSON.parse(text); } catch (e) { json = null; } }
@@ -63,7 +66,54 @@ globalThis.__stormSelectTextAll = (html, sel) => JSON.stringify(['Scraped Title'
 globalThis.__stormSelectAttr = (html, sel, attr) => (attr === 'href' ? '/x/1' : null);
 globalThis.__stormSelectAttrAll = (html, sel, attr) => JSON.stringify(['/x/1']);
 globalThis.__stormSelectHtml = (html, sel) => '<div class="title">Scraped Title</div>';
-globalThis.__stormSelectHtmlAll = (html, sel) => JSON.stringify(['<div class="title">Scraped Title</div>']);
+globalThis.__stormSelectHtmlAll = (html, sel) => {
+  if (sel === '.lnk') return JSON.stringify(['<a class="lnk" href="/x/1">x</a>']);
+  if (sel === '.name') {
+    const m = String(html).match(/<span class="name">([^<]*)<\/span>/);
+    return JSON.stringify([m ? '<span class="name">' + m[1] + '</span>' : '<span class="name"></span>']);
+  }
+  return JSON.stringify(['<div class="title">Scraped Title</div>']);
+};
+
+// ---- bridges used by the SkyStream/Nuvio dialect sections of the shim ----
+const nodeCrypto = require('crypto');
+globalThis.__stormFragmentText = (html) => String(html).replace(/<[^>]*>/g, '');
+globalThis.__stormFragmentAttr = (html, attr) => {
+  const m = String(html).match(new RegExp(attr + '="([^"]*)"'));
+  return m ? m[1] : null;
+};
+globalThis.__stormFragmentHtml = (html) => String(html);
+globalThis.__cryptoDigestHex = (hash, hex) =>
+  nodeCrypto.createHash(String(hash).toLowerCase().replace(/-/g, '')).update(Buffer.from(hex, 'hex')).digest('hex');
+globalThis.__cryptoHmacHex = (hash, keyHex, dataHex) =>
+  nodeCrypto.createHmac(String(hash).toLowerCase().replace(/^hmac/, '').replace(/-/g, ''), Buffer.from(keyHex, 'hex'))
+    .update(Buffer.from(dataHex, 'hex')).digest('hex');
+globalThis.__cryptoAesHex = (mode, keyHex, ivHex, dataHex, decrypt) => {
+  const bits = Buffer.from(keyHex, 'hex').length * 8;
+  const algo = 'aes-' + bits + '-' + String(mode).toLowerCase();
+  if (decrypt) {
+    const d = nodeCrypto.createDecipheriv(algo, Buffer.from(keyHex, 'hex'), Buffer.from(ivHex, 'hex'));
+    return Buffer.concat([d.update(Buffer.from(dataHex, 'hex')), d.final()]).toString('hex');
+  }
+  const c = nodeCrypto.createCipheriv(algo, Buffer.from(keyHex, 'hex'), Buffer.from(ivHex, 'hex'));
+  return Buffer.concat([c.update(Buffer.from(dataHex, 'hex')), c.final()]).toString('hex');
+};
+globalThis.__stormParseUrl = (url, base) => {
+  try {
+    const u = new URL(String(url), base ? String(base) : undefined);
+    return JSON.stringify({
+      href: u.href, protocol: u.protocol, host: u.host, hostname: u.hostname,
+      port: u.port, pathname: u.pathname, search: u.search, hash: u.hash, origin: u.origin,
+    });
+  } catch (e) {
+    return JSON.stringify({ href: String(url), protocol: '', host: '', hostname: '', port: '', pathname: String(url), search: '', hash: '', origin: '' });
+  }
+};
+const __scheduledTimers = {};
+globalThis.__stormSchedule = (id, ms, code) => {
+  __scheduledTimers[id] = setTimeout(() => { try { (0, eval)(code); } catch (e) {} }, ms);
+};
+globalThis.__stormCancelSchedule = (id) => { clearTimeout(__scheduledTimers[id]); delete __scheduledTimers[id]; };
 
 // ---------- load shim ----------
 vm.runInThisContext(SHIM, { filename: 'storm-js-shim.js' });
@@ -300,6 +350,170 @@ async function main() {
     await vm.runInContext('globalThis.__stormInvoke("search", JSON.stringify({ query: "x" }))', minimalSandbox);
   } catch (e) { minErr = e; }
   check('minimal: search not implemented', minErr && /does not implement/.test(String(minErr.message || minErr)), String(minErr && minErr.message));
+
+  // ===== SkyStream + Nuvio dialects (fresh sandbox per dialect) =====
+  function createSandbox(beforeShim) {
+    const sandbox = {
+      __stormUserAgent: globalThis.__stormUserAgent,
+      __stormLog: globalThis.__stormLog,
+      __stormKvGet: globalThis.__stormKvGet,
+      __stormKvSet: globalThis.__stormKvSet,
+      __stormHttpRequest: globalThis.__stormHttpRequest,
+      __stormSelectText: globalThis.__stormSelectText,
+      __stormSelectTextAll: globalThis.__stormSelectTextAll,
+      __stormSelectAttr: globalThis.__stormSelectAttr,
+      __stormSelectAttrAll: globalThis.__stormSelectAttrAll,
+      __stormSelectHtml: globalThis.__stormSelectHtml,
+      __stormSelectHtmlAll: globalThis.__stormSelectHtmlAll,
+      __stormFragmentText: globalThis.__stormFragmentText,
+      __stormFragmentAttr: globalThis.__stormFragmentAttr,
+      __stormFragmentHtml: globalThis.__stormFragmentHtml,
+      __cryptoDigestHex: globalThis.__cryptoDigestHex,
+      __cryptoHmacHex: globalThis.__cryptoHmacHex,
+      __cryptoAesHex: globalThis.__cryptoAesHex,
+      __stormParseUrl: globalThis.__stormParseUrl,
+      console, JSON, Array, Object, String, Number, Boolean, Math, Date,
+      parseFloat, parseInt, RegExp, Error, Promise, Uint8Array, TextEncoder, TextDecoder,
+      encodeURIComponent, decodeURIComponent, setTimeout, clearTimeout,
+    };
+    vm.createContext(sandbox);
+    if (beforeShim) beforeShim(sandbox);
+    vm.runInContext(SHIM, sandbox, { filename: 'storm-js-shim.js' });
+    return sandbox;
+  }
+  // script-mode evaluation (same wrapping as JsPluginRuntime scriptMode)
+  function evalScript(sandbox, source) {
+    vm.runInContext(
+      'var module = { exports: {} };\nvar exports = module.exports;\n' + source,
+      sandbox, { filename: 'plugin.js' }
+    );
+  }
+
+  const SKY_CALLBACK_PLUGIN = `
+var skyKv = {};
+function getHome(cb) {
+  cb({ success: true, data: {
+    'Trending': [ new MultimediaItem({ title: 'Sky Movie', url: 'https://sky.example/m/1', posterUrl: 'https://img/s1.jpg', type: 'movie', year: 2024, score: 8.4 }) ],
+    'Shows': [ new MultimediaItem({ title: 'Sky Show', url: 'https://sky.example/s/1', posterUrl: 'https://img/s2.jpg', type: 'series' }) ],
+  }});
+}
+function search(query, cb) {
+  cb({ success: true, data: [ { title: 'Found: ' + query, url: 'https://sky.example/m/' + query, posterUrl: 'https://img/s3.jpg', type: 'movie' } ] });
+}
+function load(url, cb) {
+  cb({ success: true, data: {
+    title: 'Sky Movie', url: url, description: 'sky desc', type: 'movie', year: 2024, score: 8.4,
+    episodes: [ { season: 1, episode: 1, title: 'Pilot', url: url + '/e1' } ],
+  }});
+}
+function loadStreams(url, cb) {
+  cb({ success: true, data: [ new StreamResult({ url: url + '.m3u8', source: 'SkyCDN', quality: '1080p', headers: { Referer: 'https://sky.example/' } }) ] });
+}
+function helper() { return getPreference('k').then(function (v) { return v; }); }
+`;
+
+  const skySandbox = createSandbox();
+  evalScript(skySandbox, SKY_CALLBACK_PLUGIN);
+  const skyDetect = JSON.parse(vm.runInContext('globalThis.__stormDetect()', skySandbox));
+  check('skystream: dialect detected (auto)', skyDetect.dialect === 'skystream', JSON.stringify(skyDetect));
+
+  const skyHome = JSON.parse(await vm.runInContext('globalThis.__stormInvokeArray("getHome", "[]")', skySandbox));
+  check('skystream: getHome sections (callback style)', skyHome && skyHome.Trending && skyHome.Trending.length === 1 && skyHome.Trending[0].title === 'Sky Movie' && skyHome.Shows[0].type === 'series', JSON.stringify(skyHome));
+
+  const skySearch = JSON.parse(await vm.runInContext('globalThis.__stormInvokeArray("search", JSON.stringify(["matrix"]))', skySandbox));
+  check('skystream: search positional (callback style)', Array.isArray(skySearch) && skySearch[0].title === 'Found: matrix', JSON.stringify(skySearch));
+
+  const skyLoad = JSON.parse(await vm.runInContext('globalThis.__stormInvokeArray("load", JSON.stringify(["https://sky.example/m/1"]))', skySandbox));
+  check('skystream: load returns details', skyLoad && skyLoad.title === 'Sky Movie' && skyLoad.description === 'sky desc' && Array.isArray(skyLoad.episodes) && skyLoad.episodes.length === 1, JSON.stringify(skyLoad));
+
+  const skyStreams = JSON.parse(await vm.runInContext('globalThis.__stormInvokeArray("loadStreams", JSON.stringify(["https://sky.example/m/1/e1"]))', skySandbox));
+  check('skystream: loadStreams', Array.isArray(skyStreams) && skyStreams[0].url === 'https://sky.example/m/1/e1.m3u8' && skyStreams[0].source === 'SkyCDN', JSON.stringify(skyStreams));
+
+  // promise-style SkyStream plugin (async functions, no callback)
+  const SKY_PROMISE_PLUGIN = `
+async function getHome() { return { 'New': [ { title: 'Promise Movie', url: 'https://sky.example/m/9', posterUrl: 'https://img/p9.jpg', type: 'movie' } ] }; }
+async function search(q) { return [ { title: 'P:' + q, url: 'https://sky.example/m/p', type: 'movie' } ]; }
+`;
+  const skyP = createSandbox();
+  evalScript(skyP, SKY_PROMISE_PLUGIN);
+  const skyPHome = JSON.parse(await vm.runInContext('globalThis.__stormInvokeArray("getHome", "[]")', skyP));
+  check('skystream: getHome promise style', skyPHome && skyPHome.New && skyPHome.New[0].title === 'Promise Movie', JSON.stringify(skyPHome));
+
+  // forced dialect + manifest global + http_get + preferences + cheerio + crypto
+  const skyF = createSandbox((sb) => {
+    sb.__stormManifestJson = JSON.stringify({ packageName: "com.test.sky", name: "TestSky", baseUrl: "https://sky.example" });
+  });
+  evalScript(skyF, SKY_CALLBACK_PLUGIN);
+  const skyFDetect = JSON.parse(vm.runInContext('globalThis.__stormDetect("skystream")', skyF));
+  check('skystream: forced dialect', skyFDetect.dialect === 'skystream', JSON.stringify(skyFDetect));
+  const skyManifest = vm.runInContext('globalThis.manifest.name + "|" + globalThis.manifest.baseUrl', skyF);
+  check('skystream: manifest global injected', skyManifest === 'TestSky|https://sky.example', skyManifest);
+  const skyHttp = await vm.runInContext(
+    '(async () => { const r = await http_get("https://api.testflix.com/catalog/trending.json"); return r.status + ":" + (r.body.indexOf("Trending Movie") >= 0); })()',
+    skyF
+  );
+  check('skystream: http_get bridge', skyHttp === '200:true', String(skyHttp));
+  await vm.runInContext('setPreference("mykey", "myvalue")', skyF);
+  const skyPref = await vm.runInContext('getPreference("mykey")', skyF);
+  check('skystream: setPreference/getPreference', skyPref === 'myvalue', String(skyPref));
+  const skyCheerio = await vm.runInContext(
+    "(async () => { const $ = cheerio.load('<html><body><a class=lnk href=/x/1>x</a></body></html>'); return $('.lnk').attr('href') + '|' + $('.lnk').text(); })()",
+    skyF
+  );
+  check('skystream: cheerio subset (attr/text)', skyCheerio === '/x/1|x', String(skyCheerio));
+  const skyMd5 = vm.runInContext('CryptoJS.MD5("abc").toString()', skyF);
+  check('skystream: CryptoJS.MD5 known answer', skyMd5 === '900150983cd24fb0d6963f7d28e17f72', skyMd5);
+  const skySha = vm.runInContext('CryptoJS.SHA256("abc").toString()', skyF);
+  check('skystream: CryptoJS.SHA256 known answer', skySha === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', skySha);
+  const skyAes = await vm.runInContext(
+    '(async () => { const enc = CryptoJS.AES.encrypt("hello world", CryptoJS.enc.Utf8.parse("0123456789abcdef"), { iv: CryptoJS.enc.Utf8.parse("abcdef9876543210"), mode: "CBC" }); const dec = CryptoJS.AES.decrypt(enc.ciphertext, CryptoJS.enc.Utf8.parse("0123456789abcdef"), { iv: CryptoJS.enc.Utf8.parse("abcdef9876543210"), mode: "CBC" }); return dec.toString(CryptoJS.enc.Utf8); })()',
+    skyF
+  );
+  check('skystream: CryptoJS AES CBC round-trip', skyAes === 'hello world', String(skyAes));
+  const skyFetch = await vm.runInContext(
+    '(async () => { const r = await fetch("https://api.testflix.com/catalog/trending.json"); const j = await r.json(); return r.ok + ":" + j.metas[0].title; })()',
+    skyF
+  );
+  check('skystream: fetch bridge (ok+json)', skyFetch === 'true:Trending Movie', String(skyFetch));
+  const skyUrl = vm.runInContext('new URL("/x/y?a=1", "https://sky.example/base/").pathname', skyF);
+  check('skystream: URL polyfill', skyUrl === '/x/y', String(skyUrl));
+
+  // ===== Nuvio scraper =====
+  const NUVIO_SCRAPER = `
+module.exports.getStreams = async function (tmdbId, mediaType, season, episode) {
+  if (SCRAPER_ID !== 'test-scraper') throw new Error('SCRAPER_ID not injected');
+  if (SCRAPER_SETTINGS.apiKey !== 'sekrit') throw new Error('SCRAPER_SETTINGS not injected');
+  const r = await fetch('https://scraper.example/api/' + tmdbId + '/' + mediaType + '/' + season + '/' + episode);
+  const doc = await parseHtml(await r.text());
+  const title = doc.querySelector('.name').textContent;
+  const $ = cheerio.load('<html><body><a class="lnk" href="/dl/1">dl</a></body></html>');
+  return [
+    { title: title, url: 'https://cdn.example/' + tmdbId + '.m3u8', quality: '1080p', headers: { Referer: 'https://scraper.example/' }, subtitles: [{ url: 'https://cdn.example/' + tmdbId + '.vtt', language: 'en', name: 'English' }] },
+    { title: 'torrent-only', infoHash: 'abcdef' }, // must be filtered out by the host (no url)
+  ];
+};
+module.exports.onSettings = async function () {
+  return [
+    { type: 'text', key: 'apiKey', title: 'API Key', defaultValue: 'sekrit' },
+    { type: 'select', key: 'quality', title: 'Quality', defaultValue: '1080p', options: [ { label: 'HD', value: '1080p' }, { label: 'SD', value: '720p' } ] },
+  ];
+};
+`;
+  const nuvioSandbox = createSandbox((sb) => {
+    sb.__stormScraperId = "test-scraper";
+    sb.__stormScraperSettingsJson = JSON.stringify({ apiKey: "sekrit" });
+  });
+  evalScript(nuvioSandbox, NUVIO_SCRAPER);
+  const nuvioDetect = JSON.parse(vm.runInContext('globalThis.__stormDetect("nuvio")', nuvioSandbox));
+  check('nuvio: forced dialect', nuvioDetect.dialect === 'nuvio', JSON.stringify(nuvioDetect));
+  const nuvioStreams = JSON.parse(await vm.runInContext('globalThis.__stormInvokeArray("getStreams", JSON.stringify(["12345", "movie", null, null]))', nuvioSandbox));
+  check('nuvio: getStreams positional', Array.isArray(nuvioStreams) && nuvioStreams.length === 2 && nuvioStreams[0].url === 'https://cdn.example/12345.m3u8' && nuvioStreams[0].quality === '1080p', JSON.stringify(nuvioStreams));
+  const nuvioEps = JSON.parse(await vm.runInContext('globalThis.__stormInvokeArray("getStreams", JSON.stringify(["678", "tv", 2, 5]))', nuvioSandbox));
+  check('nuvio: getStreams episode args reach plugin', Array.isArray(nuvioEps) && nuvioEps[0].title === 'Show S2E5', JSON.stringify(nuvioEps));
+  const nuvioSettings = JSON.parse(await vm.runInContext('globalThis.__stormInvokeArray("onSettings", "[]")', nuvioSandbox));
+  check('nuvio: onSettings layout', Array.isArray(nuvioSettings) && nuvioSettings.length === 2 && nuvioSettings[1].options.length === 2 && nuvioSettings[1].options[0].value === '1080p', JSON.stringify(nuvioSettings));
+  const nuvioAuto = JSON.parse(vm.runInContext('globalThis.__stormDetect()', nuvioSandbox));
+  check('nuvio: dialect detected (auto)', nuvioAuto.dialect === 'nuvio', JSON.stringify(nuvioAuto));
 
   console.log(failures === 0 ? '\nALL TESTS PASSED' : '\n' + failures + ' TEST(S) FAILED');
   process.exit(failures === 0 ? 0 : 1);

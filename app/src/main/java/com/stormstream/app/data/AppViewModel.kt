@@ -403,6 +403,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         providerManager.installJsPlugin(url, fallbackName = name)
     }
 
+    fun installSkyStream(url: String) = runInstall("SkyStream extension") {
+        if (url.endsWith(".sky")) {
+            providerManager.installSkyStreamPackage(url)
+        } else {
+            providerManager.installSkyStreamPlugin(
+                name = url.substringAfterLast('/').removeSuffix(".js").ifBlank { "SkyStream plugin" },
+                jsUrl = url,
+            )
+        }
+    }
+
+    fun installNuvio(url: String) = runInstall("Nuvio extension") {
+        providerManager.installNuvioManifest(url).map { it.first() }
+    }
+
     fun addRepo(url: String) {
         viewModelScope.launch {
             _busy.value = true
@@ -505,6 +520,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         ProviderType.SCRAPER -> "Scraper"
         ProviderType.IPTV -> "IPTV"
         ProviderType.JS -> "JS Plugin"
+        ProviderType.SKYSTREAM -> "SkyStream"
+        ProviderType.NUVIO -> "Nuvio"
     }
 
     /** Hide items from adult extensions unless the user opted in. */

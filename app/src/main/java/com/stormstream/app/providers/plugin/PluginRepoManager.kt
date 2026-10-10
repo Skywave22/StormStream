@@ -10,6 +10,9 @@ import com.stormstream.app.data.RepoPlugin
 import com.stormstream.app.net.StormHttpClient
 import com.stormstream.app.providers.ProviderManager
 import com.stormstream.app.util.StormJson
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -93,17 +96,44 @@ class PluginRepoManager(
             val plugins = StormJson.decodeFromString<List<RepoPlugin>>(body)
             return@withContext RepoIndex(name = url, plugins = plugins)
         }
+        // Nuvio manifest shape: {"name": …, "scrapers": […]} — one plugin entry
+        // per scraper, all pointing at the manifest URL.
+        runCatching {
+            val obj = StormJson.parseToJsonElement(body).jsonObject
+            val scrapers = obj["scrapers"]?.jsonArray
+            if (scrapers != null && scrapers.isNotEmpty()) {
+                val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: url
+                return@withContext RepoIndex(
+                    name = name,
+                    plugins = scrapers.mapNotNull { el ->
+                        val o = el as? JsonObject ?: return@mapNotNull null
+                        RepoPlugin(
+                            name = o["name"]?.jsonPrimitive?.contentOrNull
+                                ?: o["id"]?.jsonPrimitive?.contentOrNull
+                                ?: "scraper",
+                            url = url,
+                            providerType = "nuvio",
+                            description = o["description"]?.jsonPrimitive?.contentOrNull,
+                            icon = o["logo"]?.jsonPrimitive?.contentOrNull,
+                        )
+                    },
+                )
+            }
+        }
         var idx = StormJson.decodeFromString<RepoIndex>(body)
-        // CloudStream-style manifest: follow pluginLists.
-        if (idx.pluginLists.isNotEmpty()) {
-            val all = mutableListOf<RepoPlugin>()
-            idx.pluginLists.forEach { listUrl ->
+        // CloudStream-style manifest: follow pluginLists; SkyStream-style:
+        // follow nested "repos" URLs as well.
+        val extraLists = idx.pluginLists + idx.repos
+        if (extraLists.isNotEmpty()) {
+            val all = idx.plugins.toMutableList()
+            extraLists.forEach { listUrl ->
                 runCatching {
                     val listBody = http.get(http.resolve(url, listUrl))
-                    all += StormJson.decodeFromString<List<RepoPlugin>>(listBody)
+                    val nested = StormJson.decodeFromString<RepoIndex>(listBody)
+                    all += nested.plugins
                 }.onFailure { Log.w(TAG, "Failed to load plugin list $listUrl", it) }
             }
-            idx = idx.copy(plugins = all)
+            idx = idx.copy(plugins = all.distinctBy { it.name + it.url })
         }
         idx
     }
@@ -132,6 +162,22 @@ class PluginRepoManager(
             }
             ProviderType.IPTV ->
                 providerManager.installIptvPlaylist(plugin.name, plugin.url).map { }
+            ProviderType.NUVIO -> {
+                when (val r = providerManager.installNuvioManifest(plugin.url)) {
+                    is StormResult.Ok -> StormResult.Ok(Unit)
+                    is StormResult.Err -> StormResult.Err(r.error)
+                }
+            }
+            ProviderType.SKYSTREAM ->
+                if (plugin.url.endsWith(".sky")) {
+                    providerManager.installSkyStreamPackage(plugin.url).map { }
+                } else {
+                    providerManager.installSkyStreamPlugin(
+                        name = plugin.packageName ?: plugin.name,
+                        jsUrl = plugin.url,
+                        manifestUrl = plugin.manifest?.let { http.resolve(url, it) },
+                    ).map { }
+                }
             ProviderType.JS ->
                 if (plugin.files.isNotEmpty()) {
                     // Multi-file JS plugin: relative file URLs resolve against

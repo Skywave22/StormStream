@@ -40,6 +40,8 @@ data class ProviderConfig(
     val enabled: Boolean = true,
     /** Whether this provider's content is NSFW. */
     val adult: Boolean = false,
+    /** Opaque per-type metadata (SkyStream packageName, Nuvio scraperId, …). */
+    val extra: Map<String, String> = emptyMap(),
 )
 
 /**
@@ -56,7 +58,9 @@ enum class ProviderType(val key: String) {
     STREMIO("stremio"),
     SCRAPER("scraper"),
     IPTV("iptv"),
-    JS("js");
+    JS("js"),
+    SKYSTREAM("skystream"),
+    NUVIO("nuvio");
 
     companion object {
         fun fromKey(key: String?): ProviderType? =
@@ -74,6 +78,8 @@ enum class ProviderType(val key: String) {
             "scraper", "universal", "universal_scraper", "html", "json" -> SCRAPER
             "iptv", "m3u", "m3u8", "playlist" -> IPTV
             "js", "storm", "stormjs", "javascript" -> JS
+            "skystream", "sky", "skystream-extension" -> SKYSTREAM
+            "nuvio", "nuvio-plugin", "nuvio-scraper" -> NUVIO
             else -> null
         }
     }
@@ -108,6 +114,10 @@ data class MediaItem(
     val totalSeasons: Int? = null,
     /** For IPTV only: channel group. */
     val group: String? = null,
+    /** TMDB id when known (Nuvio plugins resolve streams by TMDB id). */
+    val tmdbId: String? = null,
+    /** IMDb id when known (TMDB find-by-imdb fallback). */
+    val imdbId: String? = null,
 )
 
 @Serializable
@@ -151,6 +161,8 @@ data class RepoIndex(
     val plugins: List<RepoPlugin> = emptyList(),
     /** For CloudStream-compat repos: URLs of plugin list documents. */
     val pluginLists: List<String> = emptyList(),
+    /** SkyStream-style: nested repository URLs to merge in. */
+    val repos: List<String> = emptyList(),
 )
 
 @Serializable
@@ -167,6 +179,10 @@ data class RepoPlugin(
      * catalog/posts/meta/stream modules): module name → file URL.
      */
     val files: Map<String, String> = emptyMap(),
+    /** SkyStream entries: the plugin's packageName (identity for .sky installs). */
+    val packageName: String? = null,
+    /** SkyStream entries: inline plugin.json manifest content. */
+    val manifest: String? = null,
 )
 
 /** An extension installed on the device — persisted in DataStore. */
@@ -204,4 +220,70 @@ data class JsPluginManifest(
     /** module name → file URL, for multi-file plugins. */
     val files: Map<String, String> = emptyMap(),
     val types: List<String> = emptyList(),
+)
+
+/**
+ * A declarative settings field a plugin can declare. SkyStream manifests
+ * declare `settings[]` statically; Nuvio scrapers return an equivalent layout
+ * from `onSettings()`. The app renders these as the extension's settings
+ * dialog and persists the values per extension.
+ */
+@Serializable
+data class PluginSettingField(
+    val key: String,
+    val title: String,
+    /** "bool" | "select" | "text" | "url" | "info" */
+    val type: String = "text",
+    val defaultValue: String = "",
+    val options: List<PluginSettingOption> = emptyList(),
+    val description: String? = null,
+)
+
+@Serializable
+data class PluginSettingOption(
+    val label: String,
+    val value: String,
+)
+
+/**
+ * SkyStream extension manifest (`plugin.json` inside a `.sky` package).
+ */
+@Serializable
+data class SkyStreamManifest(
+    val packageName: String = "",
+    val name: String = "",
+    val version: String = "",
+    val baseUrl: String? = null,
+    val mainUrl: String? = null,
+    val languages: List<String> = emptyList(),
+    val supportedTypes: List<String> = emptyList(),
+    val settings: List<PluginSettingField> = emptyList(),
+    val icon: String? = null,
+    val description: String? = null,
+)
+
+/**
+ * Nuvio extension manifest (`manifest.json` listing one or more scrapers).
+ */
+@Serializable
+data class NuvioManifest(
+    val name: String = "",
+    val version: String = "",
+    val description: String? = null,
+    val author: String? = null,
+    val scrapers: List<NuvioScraperDef> = emptyList(),
+)
+
+@Serializable
+data class NuvioScraperDef(
+    val id: String = "",
+    val name: String = "",
+    val description: String? = null,
+    val version: String = "",
+    val filename: String = "",
+    val supportedTypes: List<String> = listOf("movie", "tv"),
+    val enabled: Boolean = true,
+    val hasSettings: Boolean = false,
+    val logo: String? = null,
+    val contentLanguage: List<String>? = null,
 )

@@ -33,6 +33,8 @@ class SettingsStore(private val context: Context) {
     val autoplayNext: Flow<Boolean> = store.data.map { it[KEY_AUTOPLAY] ?: true }
     val showAdult: Flow<Boolean> = store.data.map { it[KEY_ADULT] ?: false }
     val subtitleScale: Flow<Double> = store.data.map { it[KEY_SUBSCALE] ?: 1.0 }
+    /** User's own TMDB v3 API key (wins over the bundled public keys). */
+    val tmdbApiKey: Flow<String> = store.data.map { it[KEY_TMDB_API_KEY] ?: "" }
 
     suspend fun setTheme(value: String) { store.edit { it[KEY_THEME] = value } }
     suspend fun setHwdec(value: Boolean) { store.edit { it[KEY_HWDEC] = value } }
@@ -40,6 +42,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setAutoplayNext(value: Boolean) { store.edit { it[KEY_AUTOPLAY] = value } }
     suspend fun setShowAdult(value: Boolean) { store.edit { it[KEY_ADULT] = value } }
     suspend fun setSubtitleScale(value: Double) { store.edit { it[KEY_SUBSCALE] = value } }
+    suspend fun setTmdbApiKey(value: String) { store.edit { it[KEY_TMDB_API_KEY] = value.trim() } }
 
     companion object {
         private val KEY_THEME = stringPreferencesKey("theme")
@@ -48,6 +51,7 @@ class SettingsStore(private val context: Context) {
         private val KEY_AUTOPLAY = booleanPreferencesKey("autoplay_next")
         private val KEY_ADULT = booleanPreferencesKey("show_adult")
         private val KEY_SUBSCALE = doublePreferencesKey("subtitle_scale")
+        private val KEY_TMDB_API_KEY = stringPreferencesKey("tmdb_api_key")
 
         @Volatile
         private var instance: SettingsStore? = null

@@ -4,6 +4,7 @@ import com.stormstream.app.core.StormResult
 import com.stormstream.app.data.CatalogRef
 import com.stormstream.app.data.Episode
 import com.stormstream.app.data.MediaItem
+import com.stormstream.app.data.PluginSettingField
 import com.stormstream.app.data.ProviderConfig
 import com.stormstream.app.data.StreamSource
 
@@ -40,6 +41,19 @@ interface StreamProvider {
 
     /** Whether this EXTENSION is itself adult/NSFW (asked once at install). */
     fun isAdultExtension(): Boolean? = config.adult
+
+    /**
+     * Declarative settings fields this provider exposes (SkyStream manifest
+     * settings / Nuvio `onSettings()` layout), or null when it has none. The
+     * app renders these as the extension's settings dialog.
+     */
+    suspend fun settingsFields(): List<PluginSettingField>? = null
+
+    /** Current setting values (key → value). */
+    suspend fun getSettings(): Map<String, String> = emptyMap()
+
+    /** Persist one setting value. */
+    suspend fun setSetting(key: String, value: String) {}
 
     // ---------- Discovery ----------
 

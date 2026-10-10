@@ -105,6 +105,14 @@ fun ExtensionsScreen(
                                 onClick = { showAddMenu = false; dialog = AddDialog.JsPlugin },
                             )
                             DropdownMenuItem(
+                                text = { Text("SkyStream extension (.sky)") },
+                                onClick = { showAddMenu = false; dialog = AddDialog.SkyStream },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Nuvio extension (manifest URL)") },
+                                onClick = { showAddMenu = false; dialog = AddDialog.Nuvio },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Extension repository") },
                                 onClick = { showAddMenu = false; dialog = AddDialog.Repo },
                             )
@@ -214,6 +222,20 @@ fun ExtensionsScreen(
         is AddDialog.JsPlugin -> JsPluginDialog(
             onDismiss = { dialog = null },
             onConfirm = { name, url -> viewModel.installJsPlugin(url, name.ifBlank { null }); dialog = null },
+        )
+        is AddDialog.SkyStream -> UrlDialog(
+            title = "Add SkyStream extension",
+            label = ".sky package or plugin.js URL",
+            placeholder = "https://…/plugin.sky",
+            onDismiss = { dialog = null },
+            onConfirm = { viewModel.installSkyStream(it); dialog = null },
+        )
+        is AddDialog.Nuvio -> UrlDialog(
+            title = "Add Nuvio extension",
+            label = "manifest.json URL",
+            placeholder = "https://…/manifest.json",
+            onDismiss = { dialog = null },
+            onConfirm = { viewModel.installNuvio(it); dialog = null },
         )
         is AddDialog.Repo -> UrlDialog(
             title = "Add extension repository",
@@ -467,6 +489,8 @@ private sealed interface AddDialog {
     data object Iptv : AddDialog
     data object Scraper : AddDialog
     data object JsPlugin : AddDialog
+    data object SkyStream : AddDialog
+    data object Nuvio : AddDialog
     data object Repo : AddDialog
 }
 

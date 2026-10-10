@@ -17,6 +17,13 @@ import com.stormstream.app.net.StormHttpClient
 import com.stormstream.app.providers.iptv.IptvProvider
 import com.stormstream.app.providers.js.JsProvider
 import com.stormstream.app.providers.js.slugify
+import com.stormstream.app.providers.skystream.SkyStreamProvider
+import com.stormstream.app.data.SkyStreamManifest
+import com.stormstream.app.providers.nuvio.NuvioProvider
+import com.stormstream.app.data.NuvioManifest
+import com.stormstream.app.net.TmdbClient
+import com.stormstream.app.data.SettingsStore
+import kotlinx.coroutines.flow.first
 import com.stormstream.app.providers.scraper.UniversalScraperConfig
 import com.stormstream.app.providers.scraper.UniversalScraperProvider
 import com.stormstream.app.providers.stremio.StremioAddonProvider
@@ -30,7 +37,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.util.zip.ZipInputStream
 
 /**
  * Central registry for every [StreamProvider] in the app.
@@ -61,6 +70,12 @@ class ProviderManager private constructor(
     val disabledIds: StateFlow<Set<String>> = _disabledIds.asStateFlow()
 
     private val lock = Any()
+
+    /** Shared TMDB client (Nuvio scrapers are browsed/resolved through TMDB). */
+    val tmdb: TmdbClient = TmdbClient(http) {
+        val custom = SettingsStore.get(context).tmdbApiKey.first()
+        custom.ifBlank { null } ?: TmdbClient.BUNDLED_KEYS.firstOrNull()
+    }
 
     // ---- access ----
 
@@ -149,6 +164,142 @@ class ProviderManager private constructor(
      *  - a plugin manifest JSON (`storm.plugin.json`) describing one or more
      *    module files (relative URLs are resolved against the manifest URL).
      */
+    /**
+     * Install a Nuvio extension: a manifest.json URL listing one or more
+     * scrapers. The manifest and every scraper file are downloaded into
+     * filesDir/nuvio/<manifest>/ and ONE provider is registered per scraper
+     * (Nuvio scrapers are TMDB-keyed stream sources).
+     */
+    suspend fun installNuvioManifest(manifestUrl: String): StormResult<List<ProviderConfig>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val manifestText = http.get(manifestUrl)
+                val manifest = StormJson.decodeFromString<NuvioManifest>(manifestText)
+                if (manifest.scrapers.isEmpty()) {
+                    return@withContext StormResult.Err(
+                        StormError.Parse("Nuvio manifest lists no scrapers", null)
+                    )
+                }
+                val dir = File(NuvioProvider.pluginsDir(context), NuvioProvider.safe(manifest.name))
+                runCatching { dir.deleteRecursively() }
+                dir.mkdirs()
+                File(dir, "manifest.json").writeText(manifestText)
+                val base = manifestUrl.substringBeforeLast('/')
+                val configs = mutableListOf<ProviderConfig>()
+                for (scraper in manifest.scrapers) {
+                    val fileName = scraper.filename.ifBlank { "${scraper.id}.js" }
+                    runCatching {
+                        http.download(http.resolve(base, fileName), File(dir, fileName))
+                    }.onFailure {
+                        return@withContext StormResult.Err(
+                            StormError.Network(
+                                "Failed to download scraper ${scraper.name}: ${it.message}",
+                                it,
+                            )
+                        )
+                    }
+                    val provider = NuvioProvider.fromDir(context, http, tmdb, dir, scraper.id)
+                    provider.initialize()
+                    register(provider)
+                    extensionStore.upsertExtension(NuvioProvider.extensionRecord(provider))
+                    configs += provider.config
+                }
+                StormResult.Ok(configs)
+            } catch (e: StormError) {
+                StormResult.Err(e)
+            } catch (e: Throwable) {
+                StormResult.Err(StormError.ProviderCrashed("nuvio:$manifestUrl", e))
+            }
+        }
+
+    /**
+     * Install a SkyStream extension package (`.sky` = zip with plugin.json +
+     * plugin.js). The package is extracted to filesDir/skystream/plugins/<pkg>/.
+     */
+    suspend fun installSkyStreamPackage(url: String): StormResult<ProviderConfig> =
+        withContext(Dispatchers.IO) {
+            try {
+                val bytes = http.getBytes(url)
+                val tmp = File(context.filesDir, "skystream/tmp-${System.currentTimeMillis()}")
+                runCatching { tmp.deleteRecursively() }
+                tmp.mkdirs()
+                ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory) {
+                            val f = File(tmp, entry.name)
+                            f.parentFile?.mkdirs()
+                            f.outputStream().use { out -> zip.copyTo(out) }
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
+                    }
+                }
+                val manifestFile = File(tmp, "plugin.json")
+                val manifest = runCatching {
+                    StormJson.decodeFromString<SkyStreamManifest>(manifestFile.readText())
+                }.getOrNull() ?: return@withContext StormResult.Err(
+                    StormError.Parse("SkyStream package has no valid plugin.json", null)
+                )
+                val pkg = manifest.packageName.ifBlank {
+                    SkyStreamProvider.safeDirName(manifest.name)
+                }
+                val dir = File(SkyStreamProvider.pluginsDir(context), pkg)
+                runCatching { dir.deleteRecursively() }
+                if (!tmp.renameTo(dir)) {
+                    // renameTo can fail across filesystems — copy instead
+                    tmp.copyRecursively(dir, overwrite = true)
+                    tmp.deleteRecursively()
+                }
+                val provider = SkyStreamProvider.fromDir(context, http, dir)
+                provider.initialize()
+                register(provider)
+                extensionStore.upsertExtension(SkyStreamProvider.extensionRecord(provider))
+                StormResult.Ok(provider.config)
+            } catch (e: StormError) {
+                StormResult.Err(e)
+            } catch (e: Throwable) {
+                StormResult.Err(StormError.ProviderCrashed("skystream:$url", e))
+            }
+        }
+
+    /**
+     * Install a SkyStream plugin from a direct plugin.js URL (plus an optional
+     * plugin.json manifest URL, as used by SkyStream repositories).
+     */
+    suspend fun installSkyStreamPlugin(
+        name: String,
+        jsUrl: String,
+        manifestUrl: String? = null,
+    ): StormResult<ProviderConfig> = withContext(Dispatchers.IO) {
+        try {
+            val pkg = SkyStreamProvider.safeDirName(name)
+            val dir = File(SkyStreamProvider.pluginsDir(context), pkg)
+            runCatching { dir.deleteRecursively() }
+            dir.mkdirs()
+            http.download(jsUrl, File(dir, "plugin.js"))
+            val manifest = manifestUrl?.let { mu ->
+                runCatching {
+                    StormJson.decodeFromString<SkyStreamManifest>(http.get(mu))
+                }.getOrNull()
+            } ?: SkyStreamManifest(
+                packageName = pkg,
+                name = name,
+                baseUrl = jsUrl.substringBefore("/", jsUrl),
+            )
+            File(dir, "plugin.json").writeText(StormJson.encodeToString(manifest))
+            val provider = SkyStreamProvider.fromDir(context, http, dir)
+            provider.initialize()
+            register(provider)
+            extensionStore.upsertExtension(SkyStreamProvider.extensionRecord(provider))
+            StormResult.Ok(provider.config)
+        } catch (e: StormError) {
+            StormResult.Err(e)
+        } catch (e: Throwable) {
+            StormResult.Err(StormError.ProviderCrashed("skystream:$name", e))
+        }
+    }
+
     suspend fun installJsPlugin(
         url: String,
         fallbackName: String? = null,
@@ -307,6 +458,40 @@ class ProviderManager private constructor(
                         val url = ext.config.sourceUrl
                             ?: return@withContext StormResult.Err(StormError.Unsupported("Missing playlist URL"))
                         installIptvPlaylist(ext.config.name, url)
+                    }
+                    ProviderType.NUVIO -> {
+                        val dir = ext.localPath?.let(::File)
+                            ?: return@withContext StormResult.Err(
+                                StormError.Unsupported("Missing Nuvio plugin directory")
+                            )
+                        val scraperId = ext.config.extra["scraperId"]
+                            ?: return@withContext StormResult.Err(
+                                StormError.Unsupported("Missing Nuvio scraper id")
+                            )
+                        if (!dir.exists()) {
+                            return@withContext StormResult.Err(
+                                StormError.Unsupported("Nuvio plugin files were deleted")
+                            )
+                        }
+                        val provider = NuvioProvider.fromDir(context, http, tmdb, dir, scraperId)
+                        provider.initialize()
+                        register(provider)
+                        StormResult.Ok(provider.config)
+                    }
+                    ProviderType.SKYSTREAM -> {
+                        val dir = ext.localPath?.let(::File)
+                            ?: return@withContext StormResult.Err(
+                                StormError.Unsupported("Missing SkyStream plugin directory")
+                            )
+                        if (!dir.exists()) {
+                            return@withContext StormResult.Err(
+                                StormError.Unsupported("SkyStream plugin files were deleted")
+                            )
+                        }
+                        val provider = SkyStreamProvider.fromDir(context, http, dir)
+                        provider.initialize()
+                        register(provider)
+                        StormResult.Ok(provider.config)
                     }
                     ProviderType.JS -> {
                         val dir = ext.localPath?.let(::File)
