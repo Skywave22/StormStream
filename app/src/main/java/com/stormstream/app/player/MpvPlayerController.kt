@@ -300,13 +300,13 @@ class MpvPlayerController private constructor(context: Context) {
         }
 
         // External subtitle tracks (e.g. from Stremio addons / JS plugins).
-        if (source.subtitles.isNotEmpty()) {
-            runCatching { instance.command("sub-remove", "secondary") }
-            source.subtitles.forEachIndexed { index, sub ->
-                val flags = if (index == 0) "select" else "auto"
-                runCatching {
-                    instance.command("sub-add", sub.url, flags, sub.label, sub.language)
-                }
+        // Always clear previous secondary subs first — otherwise subs from the
+        // previously played source would linger on the new one.
+        runCatching { instance.command("sub-remove", "secondary") }
+        source.subtitles.forEachIndexed { index, sub ->
+            val flags = if (index == 0) "select" else "auto"
+            runCatching {
+                instance.command("sub-add", sub.url, flags, sub.label, sub.language)
             }
         }
 
