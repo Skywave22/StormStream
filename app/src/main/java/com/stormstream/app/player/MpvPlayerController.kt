@@ -56,19 +56,20 @@ data class TrackInfo(
  *  - per-source HTTP headers and external subtitle tracks
  *  - end-of-file events (used for "auto play next episode")
  *
- * The UI binds a [is.xyz.mpv.BaseMPVView] to [mpv]; the [PlaybackService]
- * keeps audio alive in the background with a notification.
+ * The UI hosts a [StormMpvView] (a `is`.xyz.mpv.BaseMPVView`) which owns the
+ * single [MPV] instance; the [PlaybackService] keeps audio alive in the
+ * background with a notification.
  */
 class MpvPlayerController private constructor(context: Context) {
 
     private val appContext = context.applicationContext
     private val settings = SettingsStore.get(appContext)
 
-    private var mpvInstance: MPV? = null
+    @Volatile
+    private var mpvView: StormMpvView? = null
 
-    /** The libmpv instance. Created on first access. */
-    val mpv: MPV
-        get() = mpvInstance ?: createMpv().also { mpvInstance = it }
+    /** The libmpv instance of the current view (null after [release]). */
+    private val mpv: MPV? get() = mpvView?.mpv
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -125,19 +126,25 @@ class MpvPlayerController private constructor(context: Context) {
 
     // ---------- lifecycle ----------
 
-    private fun createMpv(): MPV {
-        val instance = MPV(
-            context = appContext,
-            configDir = File(appContext.filesDir, "mpv").absolutePath,
-            cacheDir = File(appContext.cacheDir, "mpv").absolutePath,
-        )
-        // Sensible defaults for a streaming app.
-        runCatching { instance.setPropertyString("hwdec", "auto") }
-        runCatching { instance.setPropertyString("alang", "en") }
-        runCatching { instance.setPropertyString("slang", "en") }
-        runCatching { instance.setPropertyString("keep-open", "yes") }
-        runCatching { instance.setPropertyString("osc", "no") }
-        runCatching { instance.setPropertyInt("osd-duration", 1500) }
+    /**
+     * The libmpv video surface, created (and libmpv initialized) on first
+     * access and reused for the whole app process. The PlayerScreen hosts
+     * this view; calling it here as well lets playback start (audio) before
+     * the player UI is composed.
+     */
+    fun getOrCreateView(context: Context): StormMpvView =
+        mpvView ?: synchronized(this) {
+            mpvView ?: StormMpvView(context.applicationContext).also { view ->
+                view.initialize(
+                    configDir = File(appContext.filesDir, "mpv").absolutePath,
+                    cacheDir = File(appContext.cacheDir, "mpv").absolutePath,
+                )
+                mpvView = view
+                onMpvReady(view.mpv)
+            }
+        }
+
+    private fun onMpvReady(instance: MPV) {
         // Apply persisted settings.
         scope.launch {
             settings.hwdec.collectLatest { on ->
@@ -158,7 +165,6 @@ class MpvPlayerController private constructor(context: Context) {
         }
         observeProperties(instance)
         instance.addObserver(MpvEventObserver(instance))
-        return instance
     }
 
     private fun observeProperties(instance: MPV) {
@@ -238,19 +244,19 @@ class MpvPlayerController private constructor(context: Context) {
                     scope.launch {
                         // track-list changes shortly after load; re-read it.
                         delay(250)
-                        _tracks.value = parseTracks(instance.getPropertyNode("track-list") ?: MPVNode.None)
+                        _tracks.value = instance.getPropertyNode("track-list")?.let(::parseTracks).orEmpty()
                     }
                 }
                 MPV.mpvEvent.MPV_EVENT_END_FILE -> {
-                    val reason = data["reason"]?.asString()
-                    when (reason) {
+                    val map = data.asMap().orEmpty()
+                    when (map["reason"]?.asString()) {
                         "eof" -> {
                             _isBuffering.value = false
                             _playbackEnded.tryEmit(Unit)
                         }
                         "error" -> {
-                            val err = data["file_error"]?.asString()
-                                ?: data["error"]?.asString()
+                            val err = map["file_error"]?.asString()
+                                ?: map["error"]?.asString()
                                 ?: "Playback error"
                             _error.value = err
                             _isBuffering.value = false
@@ -281,7 +287,7 @@ class MpvPlayerController private constructor(context: Context) {
         _position.value = 0.0
         _duration.value = 0.0
 
-        val instance = mpv
+        val instance = getOrCreateView(appContext).mpv
 
         // Per-source HTTP headers (mpv string-list: "Name: value,Name2: value2").
         val headerFields = source.headers.entries.joinToString(",") { "${it.key}: ${it.value}" }
@@ -321,14 +327,14 @@ class MpvPlayerController private constructor(context: Context) {
     }
 
     fun togglePause() {
-        val instance = mpvInstance ?: return
-        val paused = instance.prop<Boolean>("pause") ?: true
+        val instance = mpv ?: return
+        val paused = instance.getPropertyBoolean("pause") ?: true
         runCatching { instance.setPropertyBoolean("pause", !paused) }
         PlaybackService.update(appContext, title, !paused)
     }
 
     fun seekTo(seconds: Double) {
-        val instance = mpvInstance ?: return
+        val instance = mpv ?: return
         runCatching { instance.command("seek", seconds.coerceAtLeast(0.0).toString(), "absolute") }
     }
 
@@ -338,30 +344,32 @@ class MpvPlayerController private constructor(context: Context) {
     }
 
     fun setSpeed(speed: Double) {
-        val instance = mpvInstance ?: return
+        val instance = mpv ?: return
         runCatching { instance.setPropertyDouble("speed", speed.coerceIn(0.25, 8.0)) }
     }
 
     fun selectAudioTrack(id: Int) {
-        runCatching { mpv.command("set", "aid", id.toString()) }
+        val instance = mpv ?: return
+        runCatching { instance.command("set", "aid", id.toString()) }
     }
 
     fun selectSubTrack(id: Int?) {
+        val instance = mpv ?: return
         runCatching {
-            if (id == null) mpv.command("set", "sid", "no")
-            else mpv.command("set", "sid", id.toString())
+            if (id == null) instance.command("set", "sid", "no")
+            else instance.command("set", "sid", id.toString())
         }
     }
 
     fun toggleSubtitles() {
-        val instance = mpvInstance ?: return
-        val visible = instance.prop<Boolean>("sub-visibility") ?: true
+        val instance = mpv ?: return
+        val visible = instance.getPropertyBoolean("sub-visibility") ?: true
         runCatching { instance.setPropertyBoolean("sub-visibility", !visible) }
     }
 
     /** Stop playback and the background service (the libmpv instance stays alive). */
     fun stop() {
-        runCatching { mpvInstance?.command("stop") }
+        runCatching { mpv?.command("stop") }
         _isPlaying.value = false
         _position.value = 0.0
         PlaybackService.stop(appContext)
@@ -370,8 +378,8 @@ class MpvPlayerController private constructor(context: Context) {
     /** Release the libmpv instance entirely (app teardown / panic stop). */
     fun release() {
         PlaybackService.stop(appContext)
-        runCatching { mpvInstance?.close() }
-        mpvInstance = null
+        runCatching { mpvView?.destroy() }
+        mpvView = null
     }
 
     fun onCleared() {

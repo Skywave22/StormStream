@@ -232,11 +232,12 @@ Everything persists across restarts (DataStore).
 ./gradlew assembleDebug
 ```
 
-Requires JDK 17 + Android SDK (compileSdk 36, targetSdk 34, minSdk 24).
+Requires JDK 17 + Android SDK (compileSdk 37, targetSdk 34, minSdk 24).
 Toolchain: AGP 9.4.0, Kotlin 2.4.10, Gradle 9.7.1, Compose BOM 2026.08.00 (AGP 9.x
 has built-in Kotlin support, so `org.jetbrains.kotlin.android` is not applied)
 (the native-runtime libraries — mpv-android-lib, quickjs-kt, ksoup — are
-published only at versions built with Kotlin 2.4 / compileSdk 36, so the app
+published only at versions built with Kotlin 2.4 / compileSdk 36+, and the
+Compose BOM 2026.08.00 artifacts need compileSdk 37, so the app
 adopts the same toolchain as the production apps that ship them).
 CI builds the debug APK on every push (`.github/workflows/build-apk.yml`).
 

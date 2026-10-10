@@ -10,8 +10,10 @@ plugins {
 
 android {
     namespace = "com.stormstream.app"
-    // compileSdk 36: required by mpv-android-lib / quickjs-kt / ksoup AAR metadata (built with compileSdk 36)
-    compileSdk = 36
+    // compileSdk 37: the Compose BOM 2026.08.00 artifacts are built with compileSdk 37
+    // (mpv-android-lib / quickjs-kt / ksoup need >= 36; AGP checkDebugAarMetadata
+    // fails when the app's compileSdk is lower than a dependency's).
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.stormstream.app"

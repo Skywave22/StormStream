@@ -62,7 +62,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import `is`.xyz.mpv.BaseMPVView
+import com.stormstream.app.player.StormMpvView
 import com.stormstream.app.data.AppViewModel
 import com.stormstream.app.player.TrackInfo
 import kotlin.math.abs
@@ -99,7 +99,7 @@ private class GestureState {
 /**
  * The player screen. Video is rendered by the app's single internal libmpv
  * instance ([com.stormstream.app.player.MpvPlayerController]) into a
- * [BaseMPVView]; all controls are custom Compose UI on top.
+ * [StormMpvView] surface; all controls are custom Compose UI on top.
  *
  * Gestures: tap = show/hide controls, double-tap = seek ±10s,
  * horizontal drag = seek, vertical drag (left third) = brightness,
@@ -189,9 +189,7 @@ fun PlayerScreen(
         // ---------- libmpv video surface ----------
         AndroidView(
             factory = { ctx ->
-                BaseMPVView(ctx, null).apply {
-                    mpv = player.mpv
-                }
+                player.getOrCreateView(ctx)
             },
             modifier = Modifier
                 .fillMaxSize()
