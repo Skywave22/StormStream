@@ -38,8 +38,10 @@ jobs:
           export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null 2>&1 || true
           set -o pipefail
+          # Note: API 37+ platform packages carry the minor revision: android-37.0
           sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
-              "platform-tools" "platforms;android-37" "build-tools;34.0.0" "build-tools;36.0.0" \
+              "platform-tools" "platforms;android-37.0" \
+              "build-tools;34.0.0" "build-tools;36.0.0" "build-tools;37.0.0" \
               2>&1 | tee sdk-setup.log || {
                 echo "::error title=SDK setup failed::sdkmanager could not install the Android SDK components"
                 tail -n 30 sdk-setup.log | while IFS= read -r line; do
