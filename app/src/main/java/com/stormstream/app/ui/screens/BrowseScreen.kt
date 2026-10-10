@@ -55,24 +55,26 @@ fun BrowseScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            // Local copy so the compiler can smart-cast (delegated `state` cannot).
+            val current = state
             when {
-                state == null || (state.items.isEmpty() && state.isLoading) -> {
+                current == null || (current.items.isEmpty() && current.isLoading) -> {
                     com.stormstream.app.ui.components.CenteredLoading()
                 }
-                state.items.isEmpty() && state.error != null -> {
-                    ErrorCard(message = state.error, onRetry = { viewModel.loadBrowsePage() })
+                current.items.isEmpty() && current.error != null -> {
+                    ErrorCard(message = current.error, onRetry = { viewModel.loadBrowsePage() })
                 }
-                state.items.isEmpty() -> {
+                current.items.isEmpty() -> {
                     EmptyState(
                         title = "Nothing here",
                         message = "This catalog has no items.",
                     )
                 }
                 else -> MediaGrid(
-                    items = state.items,
+                    items = current.items,
                     onItemClick = onItemClick,
                     providerName = { viewModel.providerName(it.providerId) },
-                    isLoadingMore = state.isLoading,
+                    isLoadingMore = current.isLoading,
                     onLoadMore = { viewModel.loadBrowsePage() },
                 )
             }
